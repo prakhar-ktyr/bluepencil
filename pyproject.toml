@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bluepencil"
+description = "Edit, sign, organize and convert PDFs, fully offline"
+readme = "README.md"
+requires-python = ">=3.10"
+dynamic = ["version"]
+# GTK 4 and libadwaita (PyGObject) come from the system, or from the GNOME
+# platform inside the snap, so they are deliberately not listed here.
+dependencies = []
+
+[project.gui-scripts]
+bluepencil = "bluepencil.__main__:main"
+
+[tool.setuptools]
+packages = ["bluepencil"]
+
+[tool.setuptools.dynamic]
+version = { attr = "bluepencil.VERSION" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

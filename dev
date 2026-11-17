@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Developer helper for Bluepencil.
+#
+#   ./dev setup            one-time: create .venv with the test tools
+#   ./dev [run] [file.pdf] start the app from source
+#   ./dev test [args]      run the tests on a hidden display
+#
+# It exists because two things break a plain `python3 -m bluepencil`:
+#   1. VS Code installed as a snap passes its own GTK settings to every
+#      terminal it starts, and GTK 4 apps crash on them at startup.
+#   2. Another project's virtualenv may be active, and its Python cannot see
+#      the system GTK bindings.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+# 1. Drop any GTK-related variable that points inside the VS Code snap.
+for var in GSETTINGS_SCHEMA_DIR GTK_PATH GTK_EXE_PREFIX GIO_MODULE_DIR \
+           GDK_PIXBUF_MODULE_FILE GDK_PIXBUF_MODULEDIR GTK_IM_MODULE_FILE LOCPATH; do
+    if [[ "${!var:-}" == *"/snap/code/"* ]]; then
+        unset "$var"
+    fi
+done
+if [[ "${XDG_DATA_DIRS:-}" == *"/snap/code/"* ]]; then
+    # VS Code keeps the original value; fall back to the system default.
+    export XDG_DATA_DIRS="${XDG_DATA_DIRS_VSCODE_SNAP_ORIG:-/usr/local/share:/usr/share}"
+fi
+
+# 2. Use this project's own Python, never whichever virtualenv is active.
+unset VIRTUAL_ENV
+if [[ -x .venv/bin/python ]]; then
+    PYTHON=.venv/bin/python
+else
+    PYTHON=/usr/bin/python3
+fi
+
+command="${1:-run}"
+[[ $# -gt 0 ]] && shift
+
+case "$command" in
+    setup)
+        # --system-site-packages lets the venv see the system GTK bindings.
+        /usr/bin/python3 -m venv --system-site-packages .venv
+        .venv/bin/python -m pip install --quiet --upgrade pip pytest
+        echo "Ready. Start the app with ./dev and run the tests with ./dev test"
+        ;;
+    run)
+        exec "$PYTHON" -m bluepencil "$@"
+        ;;
+    test)
+        if command -v xvfb-run >/dev/null; then
+            # GDK_BACKEND=x11 keeps test windows on the hidden display
+            # instead of the real Wayland session.
+            GDK_BACKEND=x11 exec xvfb-run -a -s "-screen 0 1280x800x24" \
+                "$PYTHON" -m pytest "$@"
+        else
+            exec "$PYTHON" -m pytest "$@"
+        fi
+        ;;
+    *)
+        echo "Unknown command: $command (use setup, run or test)" >&2
+        exit 2
+        ;;
+esac
