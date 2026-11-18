@@ -9,10 +9,11 @@ lands, and change the plan when reality disagrees with it.
 **Where things stand:** Milestone 0 (foundations) is nearly done and most of
 Milestone 1 (viewer) works: PDFs open and display with zoom, page navigation,
 password prompts and clear errors, and the PDF engine runs in its own process
-and recovers from crashes. Still to do in Milestone 1: thumbnail sidebar,
-start page with recent files, remembering page and zoom, benchmark script.
-**Next action:** the thumbnail sidebar. Alongside it: reserve the Snap Store
-name.
+and recovers from crashes; a thumbnail sidebar shows every page. Still to do
+in Milestone 1: start page with recent files, remembering page and zoom,
+benchmark script.
+**Next action:** the start page with recent files. Alongside it: reserve the
+Snap Store name.
 
 ## Contents
 
@@ -341,7 +342,10 @@ screen plus two on either side. Rendered pages are kept in a cache with a
 memory cap (256 MB by default). During zooming the old image is stretched
 immediately and replaced by a sharp one once the zoom settles. The scroll
 position for a new zoom is set before GTK lays the pages out: set from inside
-GTK's layout pass, it is ignored for drawing and the old spot stays on screen. At very high
+GTK's layout pass, it is ignored for drawing and the old spot stays on screen.
+Thumbnails follow the same rules at a lower priority, and only for rows inside
+the open sidebar's visible area: GTK prepares about 200 rows ahead, even while
+the sidebar is closed. At very high
 zoom only the visible part of a page is rendered, so no single image grows
 beyond about 16 megapixels. Search hits, selections and annotation handles are
 painted by the page widget on top of the page image.
@@ -466,7 +470,8 @@ Interface
 - [x] Zoom: fit width, fit page, 25–800 %, Ctrl+scroll, pinch, keyboard
       (pinch is written but not yet tried on a touchpad)
 - [x] Page navigation: the "3 / 120" box, Page Up and Down, Home and End
-- [ ] Thumbnail sidebar (F9), click to jump
+- [x] Thumbnail sidebar (F9), click to jump; slides over the pages in narrow
+      windows
 - [x] Open by drag and drop and from the command line; a second file opens a
       second window (drag and drop not yet tried by hand)
 - [ ] Start page with recent files
@@ -483,7 +488,7 @@ Tests
 - [x] Interface: open a generated sample, scroll, the right pages get rendered
 - [ ] `./dev bench`: a script that measures the budgets in section 7
 
-Progress on 18 November 2026: 41 tests pass. On a hidden display, a 500-page
+Progress on 18 November 2026: 47 tests pass. On a hidden display, a 500-page
 file showed its first page 0.67–0.77 s after opening. Smooth scrolling of
 300-dpi scans and the memory cap are written but not yet measured.
 

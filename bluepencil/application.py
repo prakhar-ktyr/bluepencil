@@ -22,6 +22,7 @@ _SHORTCUTS = {
     "win.zoom-out": ["<primary>minus", "<primary>KP_Subtract"],
     "win.zoom-fit-width": ["<primary>0"],
     "win.go-to-page": ["<primary>l"],
+    "win.toggle-sidebar": ["F9"],
 }
 
 

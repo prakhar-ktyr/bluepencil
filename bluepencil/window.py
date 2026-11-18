@@ -16,6 +16,7 @@ from . import APP_NAME  # noqa: E402
 from .engine_client import EngineClient  # noqa: E402
 from .i18n import _  # noqa: E402
 from .ui.document_view import DocumentView, FitMode  # noqa: E402
+from .ui.thumbnails import ThumbnailSidebar  # noqa: E402
 
 #: Zoom levels in the zoom menu, in percent.
 ZOOM_PRESETS = (50, 100, 150, 200, 400)
@@ -33,6 +34,7 @@ _DOCUMENT_ACTIONS = (
     "zoom-fit-page",
     "zoom-percent",
     "go-to-page",
+    "toggle-sidebar",
 )
 
 
@@ -62,8 +64,9 @@ class BluepencilWindow(Adw.ApplicationWindow):
 
         #: The file on show, once it has opened.
         self.current_file: Gio.File | None = None
-        #: The page view, while a file is on show.
+        #: The page view and the thumbnails, while a file is on show.
         self.view: DocumentView | None = None
+        self.sidebar: ThumbnailSidebar | None = None
         self._engine: EngineClient | None = None
         self._loading: Gio.File | None = None
         self._loading_password: str | None = None
@@ -76,6 +79,13 @@ class BluepencilWindow(Adw.ApplicationWindow):
 
         self._title = Adw.WindowTitle(title=APP_NAME)
         header = Adw.HeaderBar(title_widget=self._title)
+        header.pack_start(
+            Gtk.ToggleButton(
+                icon_name="sidebar-show-symbolic",
+                action_name="win.toggle-sidebar",
+                tooltip_text=_("Page Thumbnails (F9)"),
+            )
+        )
         header.pack_start(Gtk.Button(label=_("Open"), action_name="win.open", tooltip_text=_("Open a PDF")))
         header.pack_end(self._build_menu_button())
 
@@ -85,8 +95,14 @@ class BluepencilWindow(Adw.ApplicationWindow):
         self._open_button.add_css_class("suggested-action")
         self._status.set_child(self._open_button)
 
+        # The open document: thumbnails beside the pages. In narrow windows
+        # the thumbnails slide over the pages instead.
+        self._split = Adw.OverlaySplitView(show_sidebar=False, min_sidebar_width=170, max_sidebar_width=220)
+        self._split.connect("notify::show-sidebar", self._on_sidebar_shown)
+
         self._stack = Gtk.Stack()
         self._stack.add_named(self._status, "status")
+        self._stack.add_named(self._split, "document")
         self._toasts = Adw.ToastOverlay(child=self._stack)
 
         self._toolbar = Adw.ToolbarView(content=self._toasts, reveal_bottom_bars=False)
@@ -94,6 +110,11 @@ class BluepencilWindow(Adw.ApplicationWindow):
         self._toolbar.add_bottom_bar(self._build_bottom_bar())
         self.set_content(self._toolbar)
         self._show_start()
+
+        narrow = Adw.Breakpoint.new(Adw.BreakpointCondition.parse("max-width: 600sp"))
+        narrow.add_setter(self._split, "collapsed", True)
+        self.add_breakpoint(narrow)
+        self.set_size_request(360, 400)  # windows with breakpoints need a minimum size
 
         drop = Gtk.DropTarget.new(Gio.File, Gdk.DragAction.COPY)
         drop.connect("drop", self._on_drop)
@@ -162,13 +183,16 @@ class BluepencilWindow(Adw.ApplicationWindow):
         view = DocumentView(self._engine, info["pages"])
         view.connect("current-page-changed", self._on_current_page_changed)
         view.connect("zoom-changed", self._on_zoom_changed)
-        if self.view is not None:
-            self._stack.remove(self.view)
+        sidebar = ThumbnailSidebar(self._engine, info["pages"])
+        sidebar.connect("page-chosen", self._on_page_chosen)
+        sidebar.set_open(self._split.get_show_sidebar())
         self.view = view
+        self.sidebar = sidebar
         self.current_file = file
         self._password = password
-        self._stack.add_named(view, "document")
-        self._stack.set_visible_child(view)
+        self._split.set_content(view)
+        self._split.set_sidebar(sidebar)
+        self._stack.set_visible_child(self._split)
 
         self._title.set_subtitle(name)
         self.set_title(_("{name} – Bluepencil").format(name=name))
@@ -214,9 +238,10 @@ class BluepencilWindow(Adw.ApplicationWindow):
         self._show_status("dialog-warning-symbolic", title, _open_error_message(code), show_button=True)
 
     def _close_document(self) -> None:
-        if self.view is not None:
-            self._stack.remove(self.view)
-            self.view = None
+        self._split.set_content(None)
+        self._split.set_sidebar(None)
+        self.view = None
+        self.sidebar = None
         self.current_file = None
         self._password = None
         self._title.set_subtitle("")
@@ -263,6 +288,8 @@ class BluepencilWindow(Adw.ApplicationWindow):
         )
         if self.view is not None:
             self.view.restart_rendering()
+        if self.sidebar is not None:
+            self.sidebar.restart_rendering()
 
     def _on_reopened(self, file: Gio.File, reply: dict, _payload: bytes) -> None:
         if file is self.current_file and not reply.get("ok"):
@@ -284,6 +311,10 @@ class BluepencilWindow(Adw.ApplicationWindow):
         add("zoom-fit-page", lambda *_args: self.view.fit(FitMode.PAGE))
         add("zoom-percent", self._on_zoom_percent, GLib.VariantType.new("i"))
         add("go-to-page", lambda *_args: self._page_entry.grab_focus())
+        sidebar = Gio.SimpleAction.new_stateful("toggle-sidebar", None, GLib.Variant.new_boolean(False))
+        sidebar.connect("change-state", self._on_toggle_sidebar)
+        self.add_action(sidebar)
+        self._actions["toggle-sidebar"] = sidebar
         self._set_document_actions(False)
 
     def _set_document_actions(self, enabled: bool) -> None:
@@ -350,6 +381,34 @@ class BluepencilWindow(Adw.ApplicationWindow):
         focus = self.get_focus()
         if focus is None or not focus.is_ancestor(self._page_entry):
             self._page_entry.set_text(str(index + 1))
+        if self.sidebar is not None:
+            self.sidebar.show_page(index)
+
+    def _on_page_chosen(self, _sidebar: ThumbnailSidebar, index: int, activated: bool) -> None:
+        if self.view is None:
+            return
+        self.view.go_to_page(index)
+        if activated:  # Enter or a double click: carry on reading there
+            self.view.focus_pages()
+
+    def _on_toggle_sidebar(self, action: Gio.SimpleAction, value: GLib.Variant) -> None:
+        action.set_state(value)
+        self._split.set_show_sidebar(value.get_boolean())
+
+    def _on_sidebar_shown(self, split: Adw.OverlaySplitView, _pspec: object) -> None:
+        # Also covers the sidebar closing itself, e.g. by a click beside it
+        # in a narrow window.
+        shown = split.get_show_sidebar()
+        self._actions["toggle-sidebar"].set_state(GLib.Variant.new_boolean(shown))
+        if self.sidebar is not None:
+            self.sidebar.set_open(shown)
+            if shown:
+                GLib.idle_add(self._reveal_current_thumbnail)
+
+    def _reveal_current_thumbnail(self) -> bool:
+        if self.sidebar is not None:
+            self.sidebar.reveal_selected()
+        return GLib.SOURCE_REMOVE
 
     def _on_zoom_changed(self, view: DocumentView) -> None:
         self._zoom_button.set_label(_("{percent}%").format(percent=round(view.zoom * 100)))

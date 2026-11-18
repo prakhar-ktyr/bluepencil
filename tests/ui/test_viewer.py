@@ -7,36 +7,31 @@ import signal
 
 import gi
 
-gi.require_version("Graphene", "1.0")
-from gi.repository import Gio, Graphene  # noqa: E402
+gi.require_version("Gio", "2.0")
+from gi.repository import Gio  # noqa: E402
 
 from bluepencil.ui.document_view import MARGIN  # noqa: E402
 
-
-def loaded(window) -> bool:
-    """the document to show its first page"""
-    return window.view is not None and window.view.pages[0].texture is not None
+from .helpers import drawn_top, loaded  # noqa: E402
 
 
-def drawn_top(view, index: int) -> float:
-    """Where page `index` is actually laid out, relative to the visible area."""
-    _ok, point = view.pages[index].compute_point(view._scroller, Graphene.Point().init(0, 0))
-    return point.y
+def fills_the_width(window) -> bool:
+    """the page to be laid out as wide as the visible area"""
+    if not loaded(window):
+        return False
+    view = window.view
+    visible_width = view._scroller.get_hadjustment().get_page_size()
+    return abs(view.pages[0].get_width() - (visible_width - 2 * MARGIN)) <= 2
 
 
 def test_pages_fit_the_window_width_at_first(run_app, make_pdf):
     def check(window) -> None:
         view = window.view
-        visible_width = view._scroller.get_hadjustment().get_page_size()
         assert view.fit_mode == "width"
-        assert abs(view.pages[0].get_width() - (visible_width - 2 * MARGIN)) <= 2
+        assert view.zoom > 1.1  # the default window is wider than a page at 100 %
         assert window._zoom_button.get_label() == f"{round(view.zoom * 100)}%"
 
-    def fitted(window) -> bool:
-        """the page to be fitted to the window width"""
-        return loaded(window) and window.view.zoom > 1.1
-
-    run_app((fitted, check), argv=[make_pdf()])
+    run_app((fills_the_width, check), argv=[make_pdf()])
 
 
 def test_fit_page_after_a_jump_keeps_that_page_on_screen(run_app, make_pdf):

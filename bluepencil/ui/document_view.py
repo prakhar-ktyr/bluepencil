@@ -45,6 +45,15 @@ class FitMode:
     PAGE = "page"
 
 
+def device_scale(widget: Gtk.Widget) -> float:
+    """Device pixels per logical pixel where `widget` is shown (2.0 on HiDPI)."""
+    native = widget.get_native()
+    surface = native.get_surface() if native is not None else None
+    if surface is not None:
+        return surface.get_scale()
+    return float(widget.get_scale_factor())
+
+
 def _same_scale(a: float, b: float) -> bool:
     """True when two render scales are close enough to look identical."""
     return a > 0 and b > 0 and abs(a - b) <= 0.02 * b
@@ -366,15 +375,8 @@ class DocumentView(Gtk.Box):
 
     # Rendering
 
-    def _device_scale(self) -> float:
-        native = self.get_native()
-        surface = native.get_surface() if native is not None else None
-        if surface is not None:
-            return surface.get_scale()
-        return float(self.get_scale_factor())
-
     def _target_scale(self, page: PageWidget) -> float:
-        scale = self._zoom * PIXELS_PER_POINT * self._device_scale()
+        scale = self._zoom * PIXELS_PER_POINT * device_scale(self)
         return limit_scale(page.width_pt, page.height_pt, scale)
 
     def _update(self) -> bool:
