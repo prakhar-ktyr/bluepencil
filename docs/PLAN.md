@@ -6,11 +6,13 @@ This is the working plan for the project: what the app is, every feature it
 will have, how it is built, and the order of work. Tick the checkboxes as work
 lands, and change the plan when reality disagrees with it.
 
-**Where things stand:** Milestone 0 (foundations) is nearly done, and Bluepencil
-is open source under the AGPL (Decision 1, settled). The app opens a window and
-accepts a PDF; it does not show pages yet.
-**Next action:** start Milestone 1, the viewer. Alongside it: push the
-repository to GitHub and reserve the Snap Store name.
+**Where things stand:** Milestone 0 (foundations) is nearly done and most of
+Milestone 1 (viewer) works: PDFs open and display with zoom, page navigation,
+password prompts and clear errors, and the PDF engine runs in its own process
+and recovers from crashes. Still to do in Milestone 1: thumbnail sidebar,
+start page with recent files, remembering page and zoom, benchmark script.
+**Next action:** the thumbnail sidebar. Alongside it: push the repository to
+GitHub and reserve the Snap Store name.
 
 ## Contents
 
@@ -337,7 +339,9 @@ runs, and the same job code will serve batch recipes and the command line.
 every page from its dimensions and asks the engine only for the pages on
 screen plus two on either side. Rendered pages are kept in a cache with a
 memory cap (256 MB by default). During zooming the old image is stretched
-immediately and replaced by a sharp one once the zoom settles. At very high
+immediately and replaced by a sharp one once the zoom settles. The scroll
+position for a new zoom is set before GTK lays the pages out: set from inside
+GTK's layout pass, it is ignored for drawing and the old spot stays on screen. At very high
 zoom only the visible part of a page is rendered, so no single image grows
 beyond about 16 megapixels. Search hits, selections and annotation handles are
 painted by the page widget on top of the page image.
@@ -447,35 +451,40 @@ release. Anything risky gets a small experiment before its milestone starts.
 
 Engine
 
-- [ ] `core/engine.py`: the engine process and its message loop
-- [ ] `engine_client.py`: start, stop and restart an engine; send prioritized
+- [x] `core/engine.py`: the engine process and its message loop
+- [x] `engine_client.py`: start, stop and restart an engine; send prioritized
       requests; deliver replies to the interface; drop stale replies
-- [ ] Open a file, with an optional password; report page count and page sizes;
+- [x] Open a file, with an optional password; report page count and page sizes;
       clear errors for damaged and unsupported files
-- [ ] Render a page, or a region of a page, to pixels at a given zoom
-- [ ] If an engine process dies, restart it and reopen the document
+- [x] Render a page, or a region of a page, to pixels at a given zoom
+- [x] If an engine process dies, restart it and reopen the document
 
 Interface
 
-- [ ] Scrolling page view with placeholders, lazy rendering and the image cache
-- [ ] Zoom: fit width, fit page, 25–800 %, Ctrl+scroll, pinch, keyboard
-- [ ] Page navigation: the "3 / 120" box, Page Up and Down, Home and End
+- [x] Scrolling page view with placeholders, lazy rendering and the image cache
+- [x] Zoom: fit width, fit page, 25–800 %, Ctrl+scroll, pinch, keyboard
+      (pinch is written but not yet tried on a touchpad)
+- [x] Page navigation: the "3 / 120" box, Page Up and Down, Home and End
 - [ ] Thumbnail sidebar (F9), click to jump
-- [ ] Open by drag and drop and from the command line; a second file opens a
-      second window
+- [x] Open by drag and drop and from the command line; a second file opens a
+      second window (drag and drop not yet tried by hand)
 - [ ] Start page with recent files
-- [ ] Password prompt; loading and error states
+- [x] Password prompt; loading and error states
 - [ ] Remember page and zoom per file
-- [ ] Mark all interface text for translation
+- [x] Mark all interface text for translation
 
 Tests
 
-- [ ] Engine functions called directly: page sizes, render dimensions,
+- [x] Engine functions called directly: page sizes, render dimensions,
       password, damaged file
-- [ ] Engine process: a request and its reply; recovery after the process is
+- [x] Engine process: a request and its reply; recovery after the process is
       killed
-- [ ] Interface: open a generated sample, scroll, the right pages get rendered
+- [x] Interface: open a generated sample, scroll, the right pages get rendered
 - [ ] `./dev bench`: a script that measures the budgets in section 7
+
+Progress on 18 November 2026: 41 tests pass. On a hidden display, a 500-page
+file showed its first page 0.67–0.77 s after opening. Smooth scrolling of
+300-dpi scans and the memory cap are written but not yet measured.
 
 **Done when:** a 500-page file shows its first page in under a second and
 scrolls smoothly, a 300-dpi scan scrolls just as smoothly, memory stays under

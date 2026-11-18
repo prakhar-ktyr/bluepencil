@@ -3,8 +3,9 @@
 A PDF app for Ubuntu and other Linux desktops: view, edit, sign, organize and
 convert PDFs in one window, with every file staying on your computer.
 
-**Status: early development.** The app opens a window and accepts a PDF, but
-does not display pages yet. The page viewer is the next feature.
+**Status: early development.** Bluepencil opens PDFs, including
+password-protected ones, and shows their pages with zoom and page navigation.
+Editing features come next.
 
 ## Run from source
 
@@ -18,7 +19,7 @@ sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 python3-venv xvfb
 Then, from this folder:
 
 ```
-./dev setup            # one-time: creates .venv with the test tools
+./dev setup            # one-time: creates .venv with the PDF engine and test tools (about 30 MB download)
 ./dev                  # start the app
 ./dev run file.pdf     # start it with a file
 ```

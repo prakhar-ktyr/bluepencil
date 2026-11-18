@@ -10,15 +10,19 @@ license = "AGPL-3.0-or-later"
 license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dynamic = ["version"]
-# GTK 4 and libadwaita (PyGObject) come from the system, or from the GNOME
-# platform inside the snap, so they are deliberately not listed here.
-dependencies = []
+# GTK 4, libadwaita and PyGObject come from the system, or from the GNOME
+# runtime inside the snap, so they are deliberately not listed here.
+# The PDF engine is pinned to an exact version: upgrades are deliberate.
+dependencies = ["pymupdf==1.28.2"]
+
+[project.optional-dependencies]
+test = ["pytest"]
 
 [project.gui-scripts]
 bluepencil = "bluepencil.__main__:main"
 
-[tool.setuptools]
-packages = ["bluepencil"]
+[tool.setuptools.packages.find]
+include = ["bluepencil*"]
 
 [tool.setuptools.dynamic]
 version = { attr = "bluepencil.VERSION" }

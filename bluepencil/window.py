@@ -1,90 +1,379 @@
 # SPDX-FileCopyrightText: 2026 Prakhar Katiyar
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The main window: header bar, Open button and the document area."""
+"""The main window: header bar, the open document, and the bar below it."""
+
+import functools
+import time
 
 import gi
 
-gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
+gi.require_version("Gdk", "4.0")
+gi.require_version("Gtk", "4.0")
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
 from . import APP_NAME  # noqa: E402
+from .engine_client import EngineClient  # noqa: E402
+from .i18n import _  # noqa: E402
+from .ui.document_view import DocumentView, FitMode  # noqa: E402
+
+#: Zoom levels in the zoom menu, in percent.
+ZOOM_PRESETS = (50, 100, 150, 200, 400)
+#: A file that stops the engine more often than this within RESTART_PERIOD
+#: seconds is given up on.
+MAX_RESTARTS = 3
+RESTART_PERIOD = 30.0
+#: Opening is usually instant, so "Opening…" only appears after this delay.
+LOADING_DELAY_MS = 300
+
+_DOCUMENT_ACTIONS = (
+    "zoom-in",
+    "zoom-out",
+    "zoom-fit-width",
+    "zoom-fit-page",
+    "zoom-percent",
+    "go-to-page",
+)
+
+
+def _open_error_message(code: str | None) -> str:
+    messages = {
+        "not-found": _("The file doesn’t exist any more."),
+        "no-permission": _("You don’t have permission to read this file."),
+        "damaged": _("The file is damaged, or it isn’t a PDF."),
+        "not-pdf": _("The file isn’t a PDF, even though its name may say so."),
+        "no-pages": _("The file has no pages."),
+        "engine-failed": _("Bluepencil’s PDF engine kept stopping while reading this file."),
+    }
+    return messages.get(code or "", _("Something went wrong while opening the file."))
+
+
+def _display_name(file: Gio.File) -> str:
+    return file.get_basename() or _("Untitled")
 
 
 class BluepencilWindow(Adw.ApplicationWindow):
+    __gtype_name__ = "BluepencilWindow"
+
     def __init__(self, **kwargs: object) -> None:
         super().__init__(**kwargs)
         self.set_title(APP_NAME)
-        self.set_default_size(1000, 700)
+        self.set_default_size(1000, 760)
 
+        #: The file on show, once it has opened.
         self.current_file: Gio.File | None = None
-
-        open_action = Gio.SimpleAction.new("open", None)
-        open_action.connect("activate", self._on_open_clicked)
-        self.add_action(open_action)
+        #: The page view, while a file is on show.
+        self.view: DocumentView | None = None
+        self._engine: EngineClient | None = None
+        self._loading: Gio.File | None = None
+        self._loading_password: str | None = None
+        #: The file whose password dialog is open.
+        self._asking: Gio.File | None = None
+        self._password: str | None = None
+        self._restarts: list[float] = []
+        self._actions: dict[str, Gio.SimpleAction] = {}
+        self._add_actions()
 
         self._title = Adw.WindowTitle(title=APP_NAME)
-
         header = Adw.HeaderBar(title_widget=self._title)
-        header.pack_start(Gtk.Button(label="Open", action_name="win.open"))
+        header.pack_start(Gtk.Button(label=_("Open"), action_name="win.open", tooltip_text=_("Open a PDF")))
         header.pack_end(self._build_menu_button())
 
-        self._status = Adw.StatusPage(
-            icon_name="x-office-document-symbolic",
-            title="Open a PDF",
-            description="Choose a file to get started.",
-            vexpand=True,
-        )
-        open_button = Gtk.Button(
-            label="Open PDF…",
-            action_name="win.open",
-            halign=Gtk.Align.CENTER,
-        )
-        open_button.add_css_class("pill")
-        open_button.add_css_class("suggested-action")
-        self._status.set_child(open_button)
+        self._status = Adw.StatusPage(vexpand=True)
+        self._open_button = Gtk.Button(label=_("Open PDF…"), action_name="win.open", halign=Gtk.Align.CENTER)
+        self._open_button.add_css_class("pill")
+        self._open_button.add_css_class("suggested-action")
+        self._status.set_child(self._open_button)
 
-        self._toasts = Adw.ToastOverlay(child=self._status)
+        self._stack = Gtk.Stack()
+        self._stack.add_named(self._status, "status")
+        self._toasts = Adw.ToastOverlay(child=self._stack)
 
-        toolbar = Adw.ToolbarView(content=self._toasts)
-        toolbar.add_top_bar(header)
-        self.set_content(toolbar)
+        self._toolbar = Adw.ToolbarView(content=self._toasts, reveal_bottom_bars=False)
+        self._toolbar.add_top_bar(header)
+        self._toolbar.add_bottom_bar(self._build_bottom_bar())
+        self.set_content(self._toolbar)
+        self._show_start()
+
+        drop = Gtk.DropTarget.new(Gio.File, Gdk.DragAction.COPY)
+        drop.connect("drop", self._on_drop)
+        self.add_controller(drop)
+        self.connect("close-request", self._on_close_request)
+
+    @property
+    def is_empty(self) -> bool:
+        """True when no file is on show, on its way, or waiting for a password."""
+        return self.current_file is None and self._loading is None and self._asking is None
 
     def open_file(self, file: Gio.File) -> None:
-        """Make `file` the window's current document."""
-        name = file.get_basename() or "Untitled"
-        if not name.lower().endswith(".pdf"):
-            self._toasts.add_toast(Adw.Toast(title=f"“{name}” is not a PDF"))
+        """Show `file` here. BluepencilApplication.open_file picks the window."""
+        if file.get_path() is None:
+            self._toast(_("Only files on this computer can be opened"))
             return
+        self._restarts = []
+        self._load(file, None)
 
+    def shutdown(self) -> None:
+        """Stop the engine. Runs when the window closes or the app quits."""
+        if self._engine is not None:
+            self._engine.close()
+            self._engine = None
+
+    # Opening
+
+    def _load(self, file: Gio.File, password: str | None) -> None:
+        self._loading = file
+        self._loading_password = password
+        engine = self._ensure_engine()
+        engine.request(
+            {"op": "open", "path": file.get_path(), "password": password},
+            functools.partial(self._on_opened, file, password),
+            key=("open",),
+        )
+        GLib.timeout_add(LOADING_DELAY_MS, self._show_loading, file)
+
+    def _ensure_engine(self) -> EngineClient:
+        if self._engine is None:
+            self._engine = EngineClient()
+            self._engine.connect("died", self._on_engine_died)
+        self._engine.start()
+        return self._engine
+
+    def _show_loading(self, file: Gio.File) -> bool:
+        if self._loading is file and self.view is None:
+            title = _("Opening “{name}”…").format(name=_display_name(file))
+            self._show_status("document-open-symbolic", title, "", show_button=False)
+        return GLib.SOURCE_REMOVE
+
+    def _on_opened(self, file: Gio.File, password: str | None, reply: dict, _payload: bytes) -> None:
+        if file is not self._loading:
+            return  # another file was asked for in the meantime
+        self._loading = None
+        error = reply.get("error")
+        if reply.get("ok"):
+            self._show_document(file, password, reply)
+        elif error in ("needs-password", "wrong-password"):
+            self._ask_password(file, wrong=error == "wrong-password")
+        else:
+            self._show_error(file, error)
+
+    def _show_document(self, file: Gio.File, password: str | None, info: dict) -> None:
+        name = _display_name(file)
+        view = DocumentView(self._engine, info["pages"])
+        view.connect("current-page-changed", self._on_current_page_changed)
+        view.connect("zoom-changed", self._on_zoom_changed)
+        if self.view is not None:
+            self._stack.remove(self.view)
+        self.view = view
         self.current_file = file
+        self._password = password
+        self._stack.add_named(view, "document")
+        self._stack.set_visible_child(view)
+
         self._title.set_subtitle(name)
-        self._status.set_title(name)
-        self._status.set_description("Opened. The page view is the next feature.")
+        self.set_title(_("{name} – Bluepencil").format(name=name))
+        self._page_total.set_label(_("of {count}").format(count=info["page_count"]))
+        self._page_entry.set_text("1")
+        self._toolbar.set_reveal_bottom_bars(True)
+        self._set_document_actions(True)
+        view.focus_pages()
+        if info.get("repaired"):
+            self._toast(_("This file is damaged. Bluepencil repaired it for viewing; the file itself is unchanged."))
+
+    def _ask_password(self, file: Gio.File, wrong: bool) -> None:
+        entry = Gtk.PasswordEntry(show_peek_icon=True, activates_default=True)
+        entry.update_property([Gtk.AccessibleProperty.LABEL], [_("Password")])
+        if wrong:
+            body = _("That password is not correct. Try again.")
+        else:
+            body = _("“{name}” is protected. Enter its password to open it.").format(name=_display_name(file))
+        dialog = Adw.AlertDialog(heading=_("Password Required"), body=body)
+        dialog.add_response("cancel", _("_Cancel"))
+        dialog.add_response("open", _("_Open"))
+        dialog.set_response_appearance("open", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("open")
+        dialog.set_close_response("cancel")
+        dialog.set_extra_child(entry)
+        dialog.connect("response", self._on_password_response, file, entry)
+        self._asking = file
+        dialog.present(self)
+        dialog.set_focus(entry)
+
+    def _on_password_response(
+        self, _dialog: Adw.AlertDialog, response: str, file: Gio.File, entry: Gtk.PasswordEntry
+    ) -> None:
+        self._asking = None
+        if response == "open":
+            self._load(file, entry.get_text())
+        elif self.current_file is None:
+            self._show_start()
+
+    def _show_error(self, file: Gio.File, code: str | None) -> None:
+        self._close_document()
+        title = _("Can’t Open “{name}”").format(name=_display_name(file))
+        self._show_status("dialog-warning-symbolic", title, _open_error_message(code), show_button=True)
+
+    def _close_document(self) -> None:
+        if self.view is not None:
+            self._stack.remove(self.view)
+            self.view = None
+        self.current_file = None
+        self._password = None
+        self._title.set_subtitle("")
+        self.set_title(APP_NAME)
+        self._toolbar.set_reveal_bottom_bars(False)
+        self._set_document_actions(False)
+
+    def _show_start(self) -> None:
+        self._show_status(
+            "x-office-document-symbolic",
+            _("Open a PDF"),
+            _("Choose a file, or drop one here."),
+            show_button=True,
+        )
+
+    def _show_status(self, icon: str, title: str, description: str, show_button: bool) -> None:
+        self._status.set_icon_name(icon)
+        self._status.set_title(title)
+        self._status.set_description(description)
+        self._open_button.set_visible(show_button)
+        self._stack.set_visible_child(self._status)
+
+    # Engine crashes
+
+    def _on_engine_died(self, engine: EngineClient) -> None:
+        file = self.current_file or self._loading
+        if file is None:
+            return  # nothing on show; the engine starts again when needed
+        now = time.monotonic()
+        self._restarts = [t for t in self._restarts if now - t < RESTART_PERIOD] + [now]
+        if len(self._restarts) > MAX_RESTARTS:
+            self._loading = None
+            self._show_error(file, "engine-failed")
+            return
+        self._toast(_("The PDF engine stopped unexpectedly and was restarted"))
+        if self.current_file is None:
+            self._load(file, self._loading_password)
+            return
+        engine.start()
+        engine.request(
+            {"op": "open", "path": file.get_path(), "password": self._password},
+            functools.partial(self._on_reopened, file),
+            key=("open",),
+        )
+        if self.view is not None:
+            self.view.restart_rendering()
+
+    def _on_reopened(self, file: Gio.File, reply: dict, _payload: bytes) -> None:
+        if file is self.current_file and not reply.get("ok"):
+            self._show_error(file, reply.get("error"))
+
+    # Controls
+
+    def _add_actions(self) -> None:
+        def add(name, callback, parameter_type=None):
+            action = Gio.SimpleAction.new(name, parameter_type)
+            action.connect("activate", callback)
+            self.add_action(action)
+            self._actions[name] = action
+
+        add("open", self._on_open_clicked)
+        add("zoom-in", lambda *_args: self.view.zoom_in())
+        add("zoom-out", lambda *_args: self.view.zoom_out())
+        add("zoom-fit-width", lambda *_args: self.view.fit(FitMode.WIDTH))
+        add("zoom-fit-page", lambda *_args: self.view.fit(FitMode.PAGE))
+        add("zoom-percent", self._on_zoom_percent, GLib.VariantType.new("i"))
+        add("go-to-page", lambda *_args: self._page_entry.grab_focus())
+        self._set_document_actions(False)
+
+    def _set_document_actions(self, enabled: bool) -> None:
+        for name in _DOCUMENT_ACTIONS:
+            self._actions[name].set_enabled(enabled)
 
     def _build_menu_button(self) -> Gtk.MenuButton:
         menu = Gio.Menu()
-        menu.append(f"About {APP_NAME}", "app.about")
-        menu.append("Quit", "app.quit")
-        return Gtk.MenuButton(
-            icon_name="open-menu-symbolic",
-            menu_model=menu,
-            tooltip_text="Main Menu",
+        menu.append(_("About {name}").format(name=APP_NAME), "app.about")
+        menu.append(_("Quit"), "app.quit")
+        return Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu, tooltip_text=_("Main Menu"))
+
+    def _build_bottom_bar(self) -> Gtk.ActionBar:
+        bar = Gtk.ActionBar()
+
+        self._page_entry = Gtk.Entry(
+            width_chars=4, max_width_chars=6, xalign=1.0, input_purpose=Gtk.InputPurpose.DIGITS
         )
+        self._page_entry.update_property([Gtk.AccessibleProperty.LABEL], [_("Page number")])
+        self._page_entry.connect("activate", self._on_page_entry_activate)
+        self._page_total = Gtk.Label()
+        pages = Gtk.Box(spacing=6)
+        pages.append(self._page_entry)
+        pages.append(self._page_total)
+        bar.pack_start(pages)
+
+        fit = Gio.Menu()
+        fit.append(_("Fit Width"), "win.zoom-fit-width")
+        fit.append(_("Fit Page"), "win.zoom-fit-page")
+        presets = Gio.Menu()
+        for percent in ZOOM_PRESETS:
+            item = Gio.MenuItem.new(_("{percent}%").format(percent=percent), None)
+            item.set_action_and_target_value("win.zoom-percent", GLib.Variant.new_int32(percent))
+            presets.append_item(item)
+        menu = Gio.Menu()
+        menu.append_section(None, fit)
+        menu.append_section(None, presets)
+        self._zoom_button = Gtk.MenuButton(label="100%", menu_model=menu, tooltip_text=_("Zoom"))
+
+        zoom = Gtk.Box()
+        zoom.add_css_class("linked")
+        zoom.append(Gtk.Button(icon_name="zoom-out-symbolic", action_name="win.zoom-out", tooltip_text=_("Zoom Out")))
+        zoom.append(self._zoom_button)
+        zoom.append(Gtk.Button(icon_name="zoom-in-symbolic", action_name="win.zoom-in", tooltip_text=_("Zoom In")))
+        bar.pack_end(zoom)
+        return bar
+
+    def _toast(self, text: str) -> None:
+        self._toasts.add_toast(Adw.Toast(title=GLib.markup_escape_text(text), timeout=5))
+
+    def _on_page_entry_activate(self, entry: Gtk.Entry) -> None:
+        if self.view is None:
+            return
+        try:
+            number = int(entry.get_text().strip())
+        except ValueError:
+            number = self.view.current_page + 1
+        number = min(max(number, 1), self.view.page_count)
+        self.view.go_to_page(number - 1)
+        entry.set_text(str(number))
+        self.view.focus_pages()
+
+    def _on_current_page_changed(self, _view: DocumentView, index: int) -> None:
+        focus = self.get_focus()
+        if focus is None or not focus.is_ancestor(self._page_entry):
+            self._page_entry.set_text(str(index + 1))
+
+    def _on_zoom_changed(self, view: DocumentView) -> None:
+        self._zoom_button.set_label(_("{percent}%").format(percent=round(view.zoom * 100)))
+
+    def _on_zoom_percent(self, _action: Gio.SimpleAction, parameter: GLib.Variant) -> None:
+        self.view.set_zoom(parameter.get_int32() / 100)
+
+    def _on_drop(self, _target: Gtk.DropTarget, value: object, _x: float, _y: float) -> bool:
+        if not isinstance(value, Gio.File):
+            return False
+        self.get_application().open_file(value, self)
+        return True
+
+    def _on_close_request(self, _window: Gtk.Window) -> bool:
+        self.shutdown()
+        return False
 
     def _on_open_clicked(self, *_args: object) -> None:
-        pdf_filter = Gtk.FileFilter(name="PDF documents")
+        pdf_filter = Gtk.FileFilter(name=_("PDF documents"))
         pdf_filter.add_mime_type("application/pdf")
         pdf_filter.add_suffix("pdf")
         filters = Gio.ListStore.new(Gtk.FileFilter)
         filters.append(pdf_filter)
-
-        dialog = Gtk.FileDialog(
-            title="Open PDF",
-            modal=True,
-            filters=filters,
-            default_filter=pdf_filter,
-        )
+        dialog = Gtk.FileDialog(title=_("Open PDF"), modal=True, filters=filters, default_filter=pdf_filter)
         dialog.open(self, None, self._on_file_chosen)
 
     def _on_file_chosen(self, dialog: Gtk.FileDialog, result: Gio.AsyncResult) -> None:
@@ -93,7 +382,7 @@ class BluepencilWindow(Adw.ApplicationWindow):
         except GLib.Error as error:
             # Closing the dialog without choosing a file is not an error.
             if not error.matches(Gtk.dialog_error_quark(), Gtk.DialogError.DISMISSED):
-                self._toasts.add_toast(Adw.Toast(title=f"Could not open the file: {error.message}"))
+                self._toast(_("Could not open the file: {reason}").format(reason=error.message))
             return
         if file is not None:
-            self.open_file(file)
+            self.get_application().open_file(file, self)

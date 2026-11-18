@@ -4,15 +4,17 @@
 #
 # Developer helper for Bluepencil.
 #
-#   ./dev setup            one-time: create .venv with the test tools
+#   ./dev setup            one-time: create .venv with the PDF engine and test tools
 #   ./dev [run] [file.pdf] start the app from source
 #   ./dev test [args]      run the tests on a hidden display
 #
-# It exists because two things break a plain `python3 -m bluepencil`:
+# It exists because three things break a plain `python3 -m bluepencil`:
 #   1. VS Code installed as a snap passes its own GTK settings to every
-#      terminal it starts, and GTK 4 apps crash on them at startup.
+#      terminal it starts, and GTK apps can crash on them at startup.
 #   2. Another project's virtualenv may be active, and its Python cannot see
 #      the system GTK bindings.
+#   3. An Ubuntu upgrade replaces the system Python, which silently breaks an
+#      existing .venv. `./dev setup` rebuilds it.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -39,11 +41,23 @@ fi
 command="${1:-run}"
 [[ $# -gt 0 ]] && shift
 
+# 3. Say clearly when the environment needs (re)building.
+if [[ "$command" != setup ]] && ! "$PYTHON" -c \
+    'import importlib.util as u, sys; sys.exit(not (u.find_spec("pymupdf") and u.find_spec("pytest")))' \
+    2>/dev/null; then
+    echo "The development environment is missing or out of date. Run: ./dev setup" >&2
+    exit 1
+fi
+
 case "$command" in
     setup)
-        # --system-site-packages lets the venv see the system GTK bindings.
-        /usr/bin/python3 -m venv --system-site-packages .venv
-        .venv/bin/python -m pip install --quiet --upgrade pip pytest
+        # --clear rebuilds from scratch; --system-site-packages lets the venv
+        # see the system GTK bindings.
+        /usr/bin/python3 -m venv --clear --system-site-packages .venv
+        .venv/bin/python -m pip install --quiet --upgrade pip
+        # Bluepencil itself in editable mode (code changes apply without
+        # reinstalling), with its PDF engine and the test tools.
+        .venv/bin/python -m pip install --quiet --editable ".[test]"
         echo "Ready. Start the app with ./dev and run the tests with ./dev test"
         ;;
     run)
