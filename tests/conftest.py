@@ -21,7 +21,7 @@ def make_pdf(tmp_path):
         options = {}
         if password is not None:
             options = {
-                "encryption": pymupdf.PDF_ENCRYPT_AES_256,
+                "encryption": pymupdf.mupdf.PDF_ENCRYPT_AES_256,
                 "user_pw": password,
                 "owner_pw": password + "-owner",
             }

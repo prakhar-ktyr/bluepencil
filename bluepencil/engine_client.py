@@ -9,6 +9,7 @@ older one that has not been sent yet, so scrolling quickly does not pile up
 renders of pages that have already left the screen.
 """
 
+import contextlib
 import heapq
 import itertools
 import os
@@ -17,6 +18,7 @@ import sys
 import threading
 from collections.abc import Callable, Hashable
 from pathlib import Path
+from typing import IO
 
 import gi
 
@@ -47,7 +49,7 @@ class EngineClient(GObject.Object):
 
     def __init__(self) -> None:
         super().__init__()
-        self._process: subprocess.Popen | None = None
+        self._process: subprocess.Popen[bytes] | None = None
         self._queue: list[tuple[int, int, Hashable]] = []
         self._waiting: dict[Hashable, tuple[int, dict, ReplyHandler]] = {}
         self._sent: dict[int, ReplyHandler] = {}
@@ -112,11 +114,9 @@ class EngineClient(GObject.Object):
         self._forget_requests()
         if process is None:
             return
-        try:
-            protocol.write_message(process.stdin, {"op": "quit", "id": 0})
-            process.stdin.close()
-        except (OSError, ValueError):
-            pass
+        with contextlib.suppress(OSError, ValueError):
+            protocol.write_message(_stdin(process), {"op": "quit", "id": 0})
+            _stdin(process).close()
         try:
             process.wait(timeout=2)
         except subprocess.TimeoutExpired:
@@ -140,24 +140,27 @@ class EngineClient(GObject.Object):
             request_id = next(self._ids)
             self._sent[request_id] = on_reply
             try:
-                protocol.write_message(process.stdin, {**request, "id": request_id})
+                protocol.write_message(_stdin(process), {**request, "id": request_id})
             except (OSError, ValueError):
                 return  # the process is gone; _on_process_ended reports it
 
-    def _read_replies(self, process: subprocess.Popen) -> None:
+    def _read_replies(self, process: subprocess.Popen[bytes]) -> None:
         """Runs in a helper thread and passes each reply to the main loop."""
+        replies = process.stdout
+        assert replies is not None  # started with stdout=PIPE
         try:
-            while (message := protocol.read_message(process.stdout)) is not None:
+            while (message := protocol.read_message(replies)) is not None:
                 GLib.idle_add(self._on_reply, process, *message)
         except (OSError, ValueError, protocol.ProtocolError):
             pass
         finally:
-            process.stdout.close()
+            replies.close()
         GLib.idle_add(self._on_process_ended, process)
 
-    def _on_reply(self, process: subprocess.Popen, reply: dict, payload: bytes) -> bool:
+    def _on_reply(self, process: subprocess.Popen[bytes], reply: dict, payload: bytes) -> bool:
         if process is self._process:
-            on_reply = self._sent.pop(reply.get("id"), None)
+            request_id = reply.get("id")
+            on_reply = self._sent.pop(request_id, None) if isinstance(request_id, int) else None
             try:
                 if on_reply is not None:
                     on_reply(reply, payload)
@@ -165,14 +168,12 @@ class EngineClient(GObject.Object):
                 self._send_waiting()
         return GLib.SOURCE_REMOVE
 
-    def _on_process_ended(self, process: subprocess.Popen) -> bool:
+    def _on_process_ended(self, process: subprocess.Popen[bytes]) -> bool:
         if process is self._process:  # not asked to stop: it crashed
             self._process = None
             self._forget_requests()
-            try:
-                process.stdin.close()
-            except OSError:
-                pass  # the unsent data has nowhere to go
+            with contextlib.suppress(OSError):  # the unsent data has nowhere to go
+                _stdin(process).close()
             try:
                 process.wait(timeout=1)
             except subprocess.TimeoutExpired:
@@ -180,3 +181,8 @@ class EngineClient(GObject.Object):
                 process.wait()
             self.emit("died")
         return GLib.SOURCE_REMOVE
+
+
+def _stdin(process: subprocess.Popen[bytes]) -> IO[bytes]:
+    assert process.stdin is not None  # started with stdin=PIPE
+    return process.stdin

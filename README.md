@@ -32,7 +32,8 @@ which otherwise crash GTK 4 apps at startup.
 ## Run the tests
 
 ```
-./dev test
+./dev test     # all tests
+./dev check    # lint (ruff) and type checks (mypy)
 ```
 
 The tests run on a hidden display (`xvfb`), so no windows appear on screen.

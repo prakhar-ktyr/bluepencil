@@ -253,7 +253,8 @@ class ThumbnailSidebar(Gtk.Box):
         origin = Graphene.Point().init(0, 0)
         for index, row in list(self._rows.items()):
             placed, point = row.compute_point(self._scroller, origin)
-            wanted = placed and row.get_height() > 0 and -reach <= point.y + row.get_height() and point.y <= height + reach
+            top, bottom = point.y, point.y + row.get_height()
+            wanted = placed and bottom > top and -reach <= bottom and top <= height + reach
             if wanted and row.item is not None and row.item.props.texture is None:
                 self._request(row.item)
             elif not wanted:

@@ -15,18 +15,18 @@ _STYLES = """
 }
 """
 
-_loaded = False
+#: Displays that have the styles already.
+_styled: set[Gdk.Display] = set()
 
 
 def load_styles() -> None:
-    """Add the styles to the display, once per process."""
-    global _loaded
+    """Add the styles to the default display, once."""
     display = Gdk.Display.get_default()
-    if _loaded or display is None:
+    if display is None or display in _styled:
         return
     provider = Gtk.CssProvider()
     provider.load_from_string(_STYLES)
     Gtk.StyleContext.add_provider_for_display(
         display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
     )
-    _loaded = True
+    _styled.add(display)

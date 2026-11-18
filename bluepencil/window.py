@@ -4,6 +4,7 @@
 
 import functools
 import time
+from collections.abc import Callable
 
 import gi
 
@@ -180,10 +181,11 @@ class BluepencilWindow(Adw.ApplicationWindow):
 
     def _show_document(self, file: Gio.File, password: str | None, info: dict) -> None:
         name = _display_name(file)
-        view = DocumentView(self._engine, info["pages"])
+        engine = self._ensure_engine()
+        view = DocumentView(engine, info["pages"])
         view.connect("current-page-changed", self._on_current_page_changed)
         view.connect("zoom-changed", self._on_zoom_changed)
-        sidebar = ThumbnailSidebar(self._engine, info["pages"])
+        sidebar = ThumbnailSidebar(engine, info["pages"])
         sidebar.connect("page-chosen", self._on_page_chosen)
         sidebar.set_open(self._split.get_show_sidebar())
         self.view = view
@@ -305,10 +307,10 @@ class BluepencilWindow(Adw.ApplicationWindow):
             self._actions[name] = action
 
         add("open", self._on_open_clicked)
-        add("zoom-in", lambda *_args: self.view.zoom_in())
-        add("zoom-out", lambda *_args: self.view.zoom_out())
-        add("zoom-fit-width", lambda *_args: self.view.fit(FitMode.WIDTH))
-        add("zoom-fit-page", lambda *_args: self.view.fit(FitMode.PAGE))
+        add("zoom-in", self._view_action(DocumentView.zoom_in))
+        add("zoom-out", self._view_action(DocumentView.zoom_out))
+        add("zoom-fit-width", self._view_action(lambda view: view.fit(FitMode.WIDTH)))
+        add("zoom-fit-page", self._view_action(lambda view: view.fit(FitMode.PAGE)))
         add("zoom-percent", self._on_zoom_percent, GLib.VariantType.new("i"))
         add("go-to-page", lambda *_args: self._page_entry.grab_focus())
         sidebar = Gio.SimpleAction.new_stateful("toggle-sidebar", None, GLib.Variant.new_boolean(False))
@@ -316,6 +318,15 @@ class BluepencilWindow(Adw.ApplicationWindow):
         self.add_action(sidebar)
         self._actions["toggle-sidebar"] = sidebar
         self._set_document_actions(False)
+
+    def _view_action(self, method: Callable[[DocumentView], object]) -> Callable[..., None]:
+        """An action handler that calls `method` on the page view, if any."""
+
+        def activate(*_args: object) -> None:
+            if self.view is not None:
+                method(self.view)
+
+        return activate
 
     def _set_document_actions(self, enabled: bool) -> None:
         for name in _DOCUMENT_ACTIONS:
@@ -414,7 +425,8 @@ class BluepencilWindow(Adw.ApplicationWindow):
         self._zoom_button.set_label(_("{percent}%").format(percent=round(view.zoom * 100)))
 
     def _on_zoom_percent(self, _action: Gio.SimpleAction, parameter: GLib.Variant) -> None:
-        self.view.set_zoom(parameter.get_int32() / 100)
+        if self.view is not None:
+            self.view.set_zoom(parameter.get_int32() / 100)
 
     def _on_drop(self, _target: Gtk.DropTarget, value: object, _x: float, _y: float) -> bool:
         if not isinstance(value, Gio.File):

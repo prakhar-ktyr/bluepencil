@@ -3,6 +3,7 @@
 """Opening a PDF and describing its pages. Runs in the engine process."""
 
 import os
+from pathlib import Path
 
 import pymupdf
 
@@ -25,7 +26,7 @@ class OpenError(Exception):
 
 def open_document(path: str, password: str | None = None) -> pymupdf.Document:
     """Open `path` as a PDF, unlocking it with `password` if it has one."""
-    if not os.path.exists(path):
+    if not Path(path).exists():
         raise OpenError(NOT_FOUND, path)
     if not os.access(path, os.R_OK):
         raise OpenError(NO_PERMISSION, path)
@@ -56,7 +57,7 @@ def describe(document: pymupdf.Document) -> dict:
     return {
         "page_count": document.page_count,
         # Sizes in points, as shown on screen: rotation and cropping applied.
-        "pages": [[page.rect.width, page.rect.height] for page in document],
+        "pages": [[page.rect.width, page.rect.height] for page in document.pages()],
         "repaired": bool(document.is_repaired),
         "title": (document.metadata or {}).get("title") or "",
     }

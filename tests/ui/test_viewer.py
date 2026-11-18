@@ -80,7 +80,7 @@ def test_opens_a_pdf_and_renders_only_pages_near_the_screen(run_app, make_pdf):
 
 
 def test_zoom_in_enlarges_the_pages_and_renders_them_sharper(run_app, make_pdf):
-    before = {}
+    before: dict[str, float] = {}
 
     def zoom_in(window) -> None:
         page = window.view.pages[0]

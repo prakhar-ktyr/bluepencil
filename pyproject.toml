@@ -17,6 +17,9 @@ dependencies = ["pymupdf==1.28.2"]
 
 [project.optional-dependencies]
 test = ["pytest"]
+# Exact versions, so that a new release of a checker cannot fail
+# `./dev check` on unchanged code.
+check = ["ruff==0.17.5", "mypy==2.4.1"]
 
 [project.gui-scripts]
 bluepencil = "bluepencil.__main__:main"
@@ -29,3 +32,29 @@ version = { attr = "bluepencil.VERSION" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "BLE", "UP", "SIM", "C4", "PIE", "PERF", "PTH", "PL", "RUF"]
+ignore = [
+    "PLR2004", # numbers in comparisons: tests compare with expected sizes all the time
+    "PLR0913", # many arguments
+    "RUF012",  # class-level dictionaries such as __gsignals__ are how PyGObject works
+]
+# Typographic quotes, apostrophes and dashes are wanted in interface text.
+allowed-confusables = ["’", "‘", "“", "”", "–", "×"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["bluepencil", "tests"]
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+
+[[tool.mypy.overrides]]
+# PyGObject has no type information, so calls into GTK are not checked.
+module = ["gi", "gi.*"]
+ignore_missing_imports = true

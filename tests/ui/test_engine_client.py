@@ -98,6 +98,7 @@ def test_close_stops_the_process_quietly(make_pdf):
     engine.connect("died", lambda _engine: died.append(True))
     engine.start()
     pid = engine.pid
+    assert pid is not None
     engine.close()
     wait_for(lambda: True, timeout=0.3)
     assert not died

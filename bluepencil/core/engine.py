@@ -8,10 +8,11 @@ leave on standard output, framed by protocol.py. Nothing else may reach
 standard output, so anything the PDF library prints goes to standard error.
 """
 
+import contextlib
 import os
 import signal
 import sys
-from typing import BinaryIO
+from typing import IO
 
 import pymupdf
 
@@ -52,7 +53,7 @@ class Engine:
         return {"ok": True, **describe(self.document)}, b""
 
 
-def serve(requests: BinaryIO, replies: BinaryIO) -> None:
+def serve(requests: IO[bytes], replies: IO[bytes]) -> None:
     """Answer requests until asked to quit or the interface goes away."""
     engine = Engine()
     while (message := protocol.read_message(requests)) is not None:
@@ -84,10 +85,8 @@ def main() -> None:
     except (BrokenPipeError, protocol.ProtocolError):
         pass  # the interface went away
     finally:
-        try:
+        with contextlib.suppress(BrokenPipeError):
             replies.close()
-        except BrokenPipeError:
-            pass
 
 
 if __name__ == "__main__":

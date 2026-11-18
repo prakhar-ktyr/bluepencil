@@ -450,7 +450,9 @@ release. Anything risky gets a small experiment before its milestone starts.
 - [ ] Reserve the name `bluepencil` on the Snap Store
 - [x] Decision 6: compatibility floor raised to Ubuntu 24.04 (18 November 2026)
 - [ ] CI: run the tests on every push, on Ubuntu 24.04 and 26.04
-- [ ] `./dev check` for lint and type checks
+- [x] `./dev check` for lint and type checks (ruff and mypy, exact versions),
+      plus tests that every source file has its licence lines and that
+      `core/` and the interface keep to their sides (rule 2 in section 11)
 
 ### Milestone 1: Viewer (1.5–2.5 weekends)
 
@@ -821,5 +823,6 @@ harder. What follows from the decision:
 9. Every source file starts with the two licence lines:
    `SPDX-FileCopyrightText: <year> <author>` and
    `SPDX-License-Identifier: AGPL-3.0-or-later`.
-10. Keep commits small, one change each, with the tests passing.
+10. Keep commits small, one change each, with `./dev check` and the tests
+    passing.
 11. When work lands or a decision is made, update this plan.

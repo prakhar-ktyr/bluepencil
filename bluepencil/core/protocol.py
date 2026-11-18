@@ -10,7 +10,7 @@ or the PDF library.
 
 import json
 import struct
-from typing import BinaryIO
+from typing import IO
 
 _LENGTHS = struct.Struct("!II")
 _MAX_HEADER = 1 << 20
@@ -20,7 +20,7 @@ class ProtocolError(Exception):
     """The other side sent something that is not a valid message."""
 
 
-def write_message(stream: BinaryIO, header: dict, payload: bytes = b"") -> None:
+def write_message(stream: IO[bytes], header: dict, payload: bytes = b"") -> None:
     data = json.dumps(header, separators=(",", ":")).encode("utf-8")
     stream.write(_LENGTHS.pack(len(data), len(payload)))
     stream.write(data)
@@ -29,11 +29,13 @@ def write_message(stream: BinaryIO, header: dict, payload: bytes = b"") -> None:
     stream.flush()
 
 
-def read_message(stream: BinaryIO) -> tuple[dict, bytes] | None:
+def read_message(stream: IO[bytes]) -> tuple[dict, bytes] | None:
     """Read one message, or return None if the stream ended between messages."""
-    lengths = _read_exactly(stream, _LENGTHS.size, end_ok=True)
-    if lengths is None:
+    lengths = _read_up_to(stream, _LENGTHS.size)
+    if not lengths:
         return None
+    if len(lengths) < _LENGTHS.size:
+        raise ProtocolError("the stream ended in the middle of a message")
     header_size, payload_size = _LENGTHS.unpack(lengths)
     if not 0 < header_size <= _MAX_HEADER:
         raise ProtocolError(f"bad header size: {header_size}")
@@ -41,19 +43,27 @@ def read_message(stream: BinaryIO) -> tuple[dict, bytes] | None:
         header = json.loads(_read_exactly(stream, header_size))
     except ValueError as error:
         raise ProtocolError(f"bad header: {error}") from error
+    if not isinstance(header, dict):
+        raise ProtocolError("bad header: not an object")
     payload = _read_exactly(stream, payload_size) if payload_size else b""
     return header, payload
 
 
-def _read_exactly(stream: BinaryIO, size: int, end_ok: bool = False) -> bytes | None:
+def _read_exactly(stream: IO[bytes], size: int) -> bytes:
+    data = _read_up_to(stream, size)
+    if len(data) < size:
+        raise ProtocolError("the stream ended in the middle of a message")
+    return data
+
+
+def _read_up_to(stream: IO[bytes], size: int) -> bytes:
+    """Read `size` bytes, or fewer only if the stream ends first."""
     chunks = []
     remaining = size
     while remaining:
         chunk = stream.read(remaining)
         if not chunk:
-            if end_ok and remaining == size:
-                return None
-            raise ProtocolError("the stream ended in the middle of a message")
+            break
         chunks.append(chunk)
         remaining -= len(chunk)
     return b"".join(chunks)
