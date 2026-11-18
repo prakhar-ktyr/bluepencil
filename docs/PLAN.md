@@ -9,11 +9,10 @@ lands, and change the plan when reality disagrees with it.
 **Where things stand:** Milestone 0 (foundations) is nearly done and most of
 Milestone 1 (viewer) works: PDFs open and display with zoom, page navigation,
 password prompts and clear errors, and the PDF engine runs in its own process
-and recovers from crashes; a thumbnail sidebar shows every page. Still to do
-in Milestone 1: start page with recent files, remembering page and zoom,
-benchmark script.
-**Next action:** the start page with recent files. Alongside it: reserve the
-Snap Store name.
+and recovers from crashes; a thumbnail sidebar shows every page; the start
+page lists recent files, and each file reopens at the page and zoom it was
+left at. Still to do in Milestone 1: benchmark script.
+**Next action:** `./dev bench`. Alongside it: reserve the Snap Store name.
 
 ## Contents
 
@@ -377,6 +376,8 @@ inside PDFs are never run. External links ask before being handed to the
 browser. There is no telemetry and no update check.
 
 **D7. Where data lives.** Settings: `~/.config/bluepencil/settings.json`.
+Recent files and where the reader left each one:
+`~/.local/state/bluepencil/history.json`, readable by its owner only.
 Saved signatures, stamps and recipes: `~/.local/share/bluepencil/`. Snapshots,
 recovery copies and thumbnails: `~/.cache/bluepencil/`. Inside the snap these
 paths sit under `~/snap/bluepencil/`. Settings are a plain JSON file, which
@@ -479,9 +480,11 @@ Interface
       windows
 - [x] Open by drag and drop and from the command line; a second file opens a
       second window (drag and drop not yet tried by hand)
-- [ ] Start page with recent files
+- [x] Start page with recent files: newest first, remove one or clear the
+      list; files that have gone leave the list; nothing is recorded while
+      the desktop's "File History" privacy setting is off
 - [x] Password prompt; loading and error states
-- [ ] Remember page and zoom per file
+- [x] Remember page and zoom per file (and the fit mode)
 - [x] Mark all interface text for translation
 
 Tests
@@ -493,7 +496,7 @@ Tests
 - [x] Interface: open a generated sample, scroll, the right pages get rendered
 - [ ] `./dev bench`: a script that measures the budgets in section 7
 
-Progress on 18 November 2026: 47 tests pass. On a hidden display, a 500-page
+Progress on 18 November 2026: 71 tests pass. On a hidden display, a 500-page
 file showed its first page 0.67–0.77 s after opening. Smooth scrolling of
 300-dpi scans and the memory cap are written but not yet measured.
 

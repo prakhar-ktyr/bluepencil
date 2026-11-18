@@ -123,7 +123,19 @@ class DocumentView(Gtk.Box):
         "zoom-changed": (GObject.SignalFlags.RUN_LAST, None, ()),
     }
 
-    def __init__(self, engine: EngineClient, page_sizes: list[tuple[float, float]]) -> None:
+    def __init__(
+        self,
+        engine: EngineClient,
+        page_sizes: list[tuple[float, float]],
+        *,
+        zoom: float = 1.0,
+        fit: str | None = FitMode.WIDTH,
+        page: int = 0,
+    ) -> None:
+        """Show pages of the given sizes, starting at `page` and `zoom`.
+
+        With `fit` set, the zoom follows the window instead.
+        """
         super().__init__(orientation=Gtk.Orientation.VERTICAL, hexpand=True, vexpand=True)
         self._engine = engine
         self.pages = [PageWidget(i, width, height) for i, (width, height) in enumerate(page_sizes)]
@@ -139,13 +151,17 @@ class DocumentView(Gtk.Box):
             focusable=True,
         )
         self._column.update_property([Gtk.AccessibleProperty.LABEL], [_("Pages")])
-        for page in self.pages:
-            self._column.append(page)
+        for sheet in self.pages:
+            self._column.append(sheet)
         self._scroller = Gtk.ScrolledWindow(child=self._column, hexpand=True, vexpand=True)
         self.append(self._scroller)
 
-        self._zoom = 1.0
-        self._fit: str | None = FitMode.WIDTH
+        self._zoom = min(MAX_ZOOM, max(MIN_ZOOM, zoom))
+        self._fit = fit
+        for sheet in self.pages:
+            sheet.zoom = self._zoom
+        #: The page to start at, until the view has a size and can go there.
+        self._start_page: int | None = min(page, len(self.pages) - 1) if page > 0 else None
         self._offsets: list[int] | None = None
         #: (page, scroll position) after go_to_page, so the page asked for
         #: stays current even if the page after it shows more.
@@ -196,6 +212,8 @@ class DocumentView(Gtk.Box):
 
     @property
     def current_page(self) -> int:
+        if self._start_page is not None:
+            return self._start_page
         return self._current_page
 
     @property
@@ -238,6 +256,9 @@ class DocumentView(Gtk.Box):
     def go_to_page(self, index: int) -> None:
         """Scroll so that page `index` (from 0) starts at the top of the screen."""
         index = min(max(index, 0), len(self.pages) - 1)
+        if self._start_page is not None:
+            self._start_page = index  # it goes there once the view has a size
+            return
         vertical = self._scroller.get_vadjustment()
         vertical.set_value(max(0.0, self._page_offsets()[index] - MARGIN))
         self._pinned = (index, vertical.get_value())
@@ -268,7 +289,17 @@ class DocumentView(Gtk.Box):
             self._size = size
             if self._fit is not None:
                 GLib.idle_add(self._refit)
+            if self._start_page is not None and min(size) > 0:
+                # After the refit, so that the page is found at its final zoom.
+                GLib.idle_add(self._go_to_start_page)
         self.queue_update()
+
+    def _go_to_start_page(self) -> bool:
+        if self._start_page is not None:
+            index, self._start_page = self._start_page, None
+            self.go_to_page(index)
+            self.queue_update()
+        return GLib.SOURCE_REMOVE
 
     def _refit(self) -> bool:
         if self._fit is not None:
@@ -381,7 +412,7 @@ class DocumentView(Gtk.Box):
 
     def _update(self) -> bool:
         self._update_queued = False
-        if not self.get_mapped() or not self.pages:
+        if not self.get_mapped() or not self.pages or self._start_page is not None:
             return GLib.SOURCE_REMOVE
         first, last = self._visible_range()
         start = max(0, first - PREFETCH)

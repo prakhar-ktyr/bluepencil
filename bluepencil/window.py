@@ -5,6 +5,7 @@
 import functools
 import time
 from collections.abc import Callable
+from pathlib import Path
 
 import gi
 
@@ -15,6 +16,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
 from . import APP_NAME  # noqa: E402
 from .engine_client import EngineClient  # noqa: E402
+from .history import History  # noqa: E402
 from .i18n import _  # noqa: E402
 from .ui.document_view import DocumentView, FitMode  # noqa: E402
 from .ui.thumbnails import ThumbnailSidebar  # noqa: E402
@@ -27,6 +29,8 @@ MAX_RESTARTS = 3
 RESTART_PERIOD = 30.0
 #: Opening is usually instant, so "Opening…" only appears after this delay.
 LOADING_DELAY_MS = 300
+#: Recent files listed on the start page.
+RECENT_SHOWN = 10
 
 _DOCUMENT_ACTIONS = (
     "zoom-in",
@@ -55,6 +59,17 @@ def _display_name(file: Gio.File) -> str:
     return file.get_basename() or _("Untitled")
 
 
+def _display_folder(path: str) -> str:
+    """The folder of `path`, with the home folder shown as ~."""
+    folder = Path(path).parent
+    home = Path.home()
+    if folder == home:
+        return "~"
+    if folder.is_relative_to(home):
+        return str(Path("~") / folder.relative_to(home))
+    return str(folder)
+
+
 class BluepencilWindow(Adw.ApplicationWindow):
     __gtype_name__ = "BluepencilWindow"
 
@@ -76,6 +91,9 @@ class BluepencilWindow(Adw.ApplicationWindow):
         self._password: str | None = None
         self._restarts: list[float] = []
         self._actions: dict[str, Gio.SimpleAction] = {}
+        #: Rows of the recent files list, with the path each one opens.
+        self._recent_rows: list[tuple[str, Adw.ActionRow]] = []
+        self._history_handler = 0
         self._add_actions()
 
         self._title = Adw.WindowTitle(title=APP_NAME)
@@ -94,7 +112,10 @@ class BluepencilWindow(Adw.ApplicationWindow):
         self._open_button = Gtk.Button(label=_("Open PDF…"), action_name="win.open", halign=Gtk.Align.CENTER)
         self._open_button.add_css_class("pill")
         self._open_button.add_css_class("suggested-action")
-        self._status.set_child(self._open_button)
+        start = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=36)
+        start.append(self._open_button)
+        start.append(self._build_recent_files())
+        self._status.set_child(Adw.Clamp(maximum_size=520, child=start))
 
         # The open document: thumbnails beside the pages. In narrow windows
         # the thumbnails slide over the pages instead.
@@ -137,9 +158,17 @@ class BluepencilWindow(Adw.ApplicationWindow):
 
     def shutdown(self) -> None:
         """Stop the engine. Runs when the window closes or the app quits."""
+        self._remember_position()
+        if self._history_handler:
+            self._history.disconnect(self._history_handler)
+            self._history_handler = 0
         if self._engine is not None:
             self._engine.close()
             self._engine = None
+
+    @property
+    def _history(self) -> History:
+        return self.get_application().history
 
     # Opening
 
@@ -182,7 +211,14 @@ class BluepencilWindow(Adw.ApplicationWindow):
     def _show_document(self, file: Gio.File, password: str | None, info: dict) -> None:
         name = _display_name(file)
         engine = self._ensure_engine()
-        view = DocumentView(engine, info["pages"])
+        path = file.get_path()
+        # Back to where the reader left this file last time.
+        place = self._history.lookup(path)
+        if place is not None:
+            view = DocumentView(engine, info["pages"], zoom=place.zoom, fit=place.fit, page=place.page)
+        else:
+            view = DocumentView(engine, info["pages"])
+        self._history.opened(path)
         view.connect("current-page-changed", self._on_current_page_changed)
         view.connect("zoom-changed", self._on_zoom_changed)
         sidebar = ThumbnailSidebar(engine, info["pages"])
@@ -199,7 +235,9 @@ class BluepencilWindow(Adw.ApplicationWindow):
         self._title.set_subtitle(name)
         self.set_title(_("{name} – Bluepencil").format(name=name))
         self._page_total.set_label(_("of {count}").format(count=info["page_count"]))
-        self._page_entry.set_text("1")
+        self._page_entry.set_text(str(view.current_page + 1))
+        self._on_zoom_changed(view)
+        sidebar.show_page(view.current_page)
         self._toolbar.set_reveal_bottom_bars(True)
         self._set_document_actions(True)
         view.focus_pages()
@@ -235,11 +273,14 @@ class BluepencilWindow(Adw.ApplicationWindow):
             self._show_start()
 
     def _show_error(self, file: Gio.File, code: str | None) -> None:
+        if code == "not-found":
+            self._history.forget(file.get_path())
         self._close_document()
         title = _("Can’t Open “{name}”").format(name=_display_name(file))
         self._show_status("dialog-warning-symbolic", title, _open_error_message(code), show_button=True)
 
     def _close_document(self) -> None:
+        self._remember_position()
         self._split.set_content(None)
         self._split.set_sidebar(None)
         self.view = None
@@ -257,14 +298,73 @@ class BluepencilWindow(Adw.ApplicationWindow):
             _("Open a PDF"),
             _("Choose a file, or drop one here."),
             show_button=True,
+            show_recent=True,
         )
 
-    def _show_status(self, icon: str, title: str, description: str, show_button: bool) -> None:
+    def _show_status(
+        self, icon: str, title: str, description: str, show_button: bool, show_recent: bool = False
+    ) -> None:
         self._status.set_icon_name(icon)
         self._status.set_title(title)
         self._status.set_description(description)
         self._open_button.set_visible(show_button)
+        self._recent_shown = show_recent
+        self._refresh_recent_files()
         self._stack.set_visible_child(self._status)
+
+    # Recent files
+
+    def _build_recent_files(self) -> Adw.PreferencesGroup:
+        self._recent_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        self._recent_list.add_css_class("boxed-list")
+        self._recent_list.update_property([Gtk.AccessibleProperty.LABEL], [_("Recent Files")])
+        clear = Gtk.Button(label=_("_Clear List"), use_underline=True, valign=Gtk.Align.CENTER)
+        clear.add_css_class("flat")
+        clear.connect("clicked", lambda *_args: self._history.clear())
+        self._recent_group = Adw.PreferencesGroup(title=_("Recent Files"), header_suffix=clear)
+        self._recent_group.add(self._recent_list)
+        self._recent_shown = False
+        self._history_handler = self._history.connect("changed", lambda *_args: self._refresh_recent_files())
+        return self._recent_group
+
+    def _refresh_recent_files(self) -> None:
+        entries = self._history.recent()[:RECENT_SHOWN] if self._recent_shown else []
+        self._recent_list.remove_all()
+        self._recent_rows = []
+        for entry in entries:
+            name = Path(entry.path).name
+            # use_markup off: a file name is shown as it is, "&" and all.
+            row = Adw.ActionRow(
+                title=name,
+                subtitle=_display_folder(entry.path),
+                use_markup=False,
+                activatable=True,
+                title_lines=1,
+                subtitle_lines=1,
+            )
+            row.set_tooltip_text(entry.path)  # the full path, when the row cuts it short
+            # "activated" covers a click, Enter, and the row's own activate().
+            row.connect("activated", self._on_recent_activated, entry.path)
+            remove = Gtk.Button(icon_name="window-close-symbolic", valign=Gtk.Align.CENTER)
+            remove.set_tooltip_text(_("Remove From List"))
+            remove.update_property(
+                [Gtk.AccessibleProperty.LABEL], [_("Remove “{name}” from the list").format(name=name)]
+            )
+            remove.add_css_class("flat")
+            remove.connect("clicked", lambda _button, path=entry.path: self._history.forget(path))
+            row.add_suffix(remove)
+            self._recent_list.append(row)
+            self._recent_rows.append((entry.path, row))
+        self._recent_group.set_visible(bool(entries))
+
+    def _on_recent_activated(self, _row: Adw.ActionRow, path: str) -> None:
+        self.get_application().open_file(Gio.File.new_for_path(path), self)
+
+    def _remember_position(self) -> None:
+        if self.view is not None and self.current_file is not None:
+            self._history.remember_position(
+                self.current_file.get_path(), self.view.current_page, self.view.zoom, self.view.fit_mode
+            )
 
     # Engine crashes
 
@@ -394,6 +494,7 @@ class BluepencilWindow(Adw.ApplicationWindow):
             self._page_entry.set_text(str(index + 1))
         if self.sidebar is not None:
             self.sidebar.show_page(index)
+        self._remember_position()
 
     def _on_page_chosen(self, _sidebar: ThumbnailSidebar, index: int, activated: bool) -> None:
         if self.view is None:
@@ -423,6 +524,7 @@ class BluepencilWindow(Adw.ApplicationWindow):
 
     def _on_zoom_changed(self, view: DocumentView) -> None:
         self._zoom_button.set_label(_("{percent}%").format(percent=round(view.zoom * 100)))
+        self._remember_position()
 
     def _on_zoom_percent(self, _action: Gio.SimpleAction, parameter: GLib.Variant) -> None:
         if self.view is not None:

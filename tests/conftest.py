@@ -2,8 +2,22 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Fixtures for every test. PDFs are generated, so no sample files are needed."""
 
+import os
+
 import pymupdf
 import pytest
+
+# Desktop settings start from their defaults in tests, whatever the
+# developer's own desktop is set to. GLib reads this once, at first use.
+os.environ["GSETTINGS_BACKEND"] = "memory"
+
+
+@pytest.fixture(autouse=True)
+def private_state(tmp_path, monkeypatch):
+    """Keep the app's state, such as recent files, inside each test's folder."""
+    state = tmp_path / "state"
+    monkeypatch.setenv("XDG_STATE_HOME", str(state))
+    return state
 
 
 @pytest.fixture
