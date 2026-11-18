@@ -167,9 +167,12 @@ def test_reopening_a_file_returns_to_the_same_page_and_zoom(run_app, make_pdf):
         assert drawn_top(view, 37) == pytest.approx(MARGIN, abs=2)
         assert window._page_entry.get_text() == "38"
         assert window._zoom_button.get_label() == "150%"
+        window.activate_action("win.toggle-sidebar", None)
+
+    def thumbnail_selected(window) -> None:
         assert window.sidebar.selected == 37
 
-    run_app((shows_page(37), check), argv=[path])
+    run_app((shows_page(37), check), thumbnail_selected, argv=[path])
 
 
 def test_fit_page_is_remembered(run_app, make_pdf):

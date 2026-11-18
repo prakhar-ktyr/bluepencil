@@ -23,6 +23,7 @@ from gi.repository import Gdk, GLib, GObject, Graphene, Gsk, Gtk  # noqa: E402
 from ..core.limits import limit_scale  # noqa: E402
 from ..engine_client import EngineClient  # noqa: E402
 from ..i18n import _  # noqa: E402
+from .weak import weakly  # noqa: E402
 
 #: At 100 % a page appears at its printed size: PDF points are 1/72 inch and
 #: the screen has 96 logical pixels per inch.
@@ -52,6 +53,20 @@ def device_scale(widget: Gtk.Widget) -> float:
     if surface is not None:
         return surface.get_scale()
     return float(widget.get_scale_factor())
+
+
+def scaling_filter(texture: Gdk.Texture, widget: Gtk.Widget) -> Gsk.ScalingFilter:
+    """How to draw `texture` over `widget`.
+
+    Mipmapped (trilinear) filtering keeps text smooth when an image is shown
+    much smaller than it is, as right after zooming out. It also makes the
+    renderer build smaller copies of every image it draws, which costs time
+    and memory for nothing when the image is shown at about its own size.
+    """
+    shown = widget.get_width() * device_scale(widget)
+    if shown > 0 and texture.get_width() > 1.5 * shown:
+        return Gsk.ScalingFilter.TRILINEAR
+    return Gsk.ScalingFilter.LINEAR
 
 
 def _same_scale(a: float, b: float) -> bool:
@@ -111,7 +126,7 @@ class PageWidget(Gtk.Widget):
         # a sharper image is on its way, the old one is stretched to fit.
         if self.texture is not None:
             bounds = Graphene.Rect().init(0, 0, self.get_width(), self.get_height())
-            snapshot.append_scaled_texture(self.texture, Gsk.ScalingFilter.TRILINEAR, bounds)
+            snapshot.append_scaled_texture(self.texture, scaling_filter(self.texture, self), bounds)
 
 
 class DocumentView(Gtk.Box):
@@ -131,10 +146,13 @@ class DocumentView(Gtk.Box):
         zoom: float = 1.0,
         fit: str | None = FitMode.WIDTH,
         page: int = 0,
+        size_hint: tuple[int, int] = (0, 0),
     ) -> None:
         """Show pages of the given sizes, starting at `page` and `zoom`.
 
-        With `fit` set, the zoom follows the window instead.
+        With `fit` set, the zoom follows the window instead. `size_hint` is
+        the size the view is expected to get: fitting to it straight away
+        saves laying every page out twice when the view first appears.
         """
         super().__init__(orientation=Gtk.Orientation.VERTICAL, hexpand=True, vexpand=True)
         self._engine = engine
@@ -156,12 +174,16 @@ class DocumentView(Gtk.Box):
         self._scroller = Gtk.ScrolledWindow(child=self._column, hexpand=True, vexpand=True)
         self.append(self._scroller)
 
-        self._zoom = min(MAX_ZOOM, max(MIN_ZOOM, zoom))
         self._fit = fit
+        #: Size of the visible area, as last seen.
+        self._size = size_hint
+        fitted = self._fit_zoom(fit) if fit is not None else None
+        self._zoom = min(MAX_ZOOM, max(MIN_ZOOM, fitted or zoom))
         for sheet in self.pages:
             sheet.zoom = self._zoom
         #: The page to start at, until the view has a size and can go there.
         self._start_page: int | None = min(page, len(self.pages) - 1) if page > 0 else None
+        self._start_scheduled = False
         self._offsets: list[int] | None = None
         #: (page, scroll position) after go_to_page, so the page asked for
         #: stays current even if the page after it shows more.
@@ -169,34 +191,33 @@ class DocumentView(Gtk.Box):
         self._current_page = 0
         self._wanted: set[int] = set()
         self._update_queued = False
-        #: Size of the visible area, as last seen.
-        self._size = (0, 0)
         self._pinch_start = 1.0
 
         vertical = self._scroller.get_vadjustment()
-        vertical.connect("value-changed", lambda *_args: self.queue_update())
-        vertical.connect("changed", self._on_viewport_changed)
-        self._scroller.get_hadjustment().connect("changed", self._on_viewport_changed)
-        self.connect("map", lambda *_args: self.queue_update())
-        self.connect("notify::scale-factor", lambda *_args: self.queue_update())
+        # Handlers on things this view owns are connected weakly (see weak.py).
+        vertical.connect("value-changed", weakly(self._on_scrolled))
+        vertical.connect("changed", weakly(self._on_viewport_changed))
+        self._scroller.get_hadjustment().connect("changed", weakly(self._on_viewport_changed))
+        self.connect("map", self._on_scrolled)
+        self.connect("notify::scale-factor", self._on_scrolled)
 
         scroll = Gtk.EventControllerScroll.new(Gtk.EventControllerScrollFlags.VERTICAL)
         scroll.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-        scroll.connect("scroll", self._on_scroll)
+        scroll.connect("scroll", weakly(self._on_scroll))
         self.add_controller(scroll)
 
         pinch = Gtk.GestureZoom()
-        pinch.connect("begin", self._on_pinch_begin)
-        pinch.connect("scale-changed", self._on_pinch)
+        pinch.connect("begin", weakly(self._on_pinch_begin))
+        pinch.connect("scale-changed", weakly(self._on_pinch))
         self.add_controller(pinch)
 
         keys = Gtk.EventControllerKey()
         keys.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-        keys.connect("key-pressed", self._on_key_pressed)
+        keys.connect("key-pressed", weakly(self._on_key_pressed))
         self.add_controller(keys)
 
         click = Gtk.GestureClick()
-        click.connect("pressed", lambda *_args: self._column.grab_focus())
+        click.connect("pressed", weakly(self._on_pressed))
         self._column.add_controller(click)
 
     # Public API
@@ -279,6 +300,9 @@ class DocumentView(Gtk.Box):
 
     # Layout
 
+    def _on_scrolled(self, *_args: object) -> None:
+        self.queue_update()
+
     def _on_viewport_changed(self, _adjustment: Gtk.Adjustment) -> None:
         # Runs inside GTK's layout pass: only note the size and schedule work.
         size = (
@@ -289,9 +313,10 @@ class DocumentView(Gtk.Box):
             self._size = size
             if self._fit is not None:
                 GLib.idle_add(self._refit)
-            if self._start_page is not None and min(size) > 0:
-                # After the refit, so that the page is found at its final zoom.
-                GLib.idle_add(self._go_to_start_page)
+        if self._start_page is not None and min(size) > 0 and not self._start_scheduled:
+            # After any refit, so that the page is found at its final zoom.
+            self._start_scheduled = True
+            GLib.idle_add(self._go_to_start_page)
         self.queue_update()
 
     def _go_to_start_page(self) -> bool:
@@ -484,6 +509,9 @@ class DocumentView(Gtk.Box):
                 return
 
     # Input
+
+    def _on_pressed(self, *_args: object) -> None:
+        self._column.grab_focus()
 
     def _on_scroll(self, controller: Gtk.EventControllerScroll, _dx: float, dy: float) -> bool:
         if not controller.get_current_event_state() & Gdk.ModifierType.CONTROL_MASK:

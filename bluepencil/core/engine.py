@@ -18,6 +18,7 @@ import pymupdf
 
 from . import protocol
 from .document import OpenError, describe, open_document
+from .memory import release_memory_promptly
 from .render import render_page
 
 
@@ -74,6 +75,7 @@ def main() -> None:
     # Ctrl+C in a terminal reaches every process of the app. The interface
     # decides when the engine stops, by closing its standard input.
     signal.signal(signal.SIGINT, signal.SIG_IGN)
+    release_memory_promptly()
     replies = os.fdopen(os.dup(sys.stdout.fileno()), "wb")
     os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
     sys.stdout = sys.stderr

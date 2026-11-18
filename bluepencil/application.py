@@ -11,6 +11,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gio, Gtk  # noqa: E402
 
 from . import APP_ID, APP_NAME, APP_SUMMARY, COPYRIGHT, VERSION  # noqa: E402
+from .core.memory import release_memory_promptly  # noqa: E402
 from .history import History  # noqa: E402
 from .i18n import _  # noqa: E402
 from .ui.styles import load_styles  # noqa: E402
@@ -48,6 +49,7 @@ class BluepencilApplication(Adw.Application):
         # HANDLES_OPEN lets "Open With Bluepencil" in the file manager and
         # `bluepencil file.pdf` on the command line reach do_open().
         super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.HANDLES_OPEN)
+        release_memory_promptly()
         #: Recent files and where the reader left each one, for every window.
         self.history = History()
         self._add_action("about", self._on_about)

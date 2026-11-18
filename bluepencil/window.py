@@ -3,7 +3,9 @@
 """The main window: header bar, the open document, and the bar below it."""
 
 import functools
+import inspect
 import time
+import weakref
 from collections.abc import Callable
 from pathlib import Path
 
@@ -20,6 +22,7 @@ from .history import History  # noqa: E402
 from .i18n import _  # noqa: E402
 from .ui.document_view import DocumentView, FitMode  # noqa: E402
 from .ui.thumbnails import ThumbnailSidebar  # noqa: E402
+from .ui.weak import weakly  # noqa: E402
 
 #: Zoom levels in the zoom menu, in percent.
 ZOOM_PRESETS = (50, 100, 150, 200, 400)
@@ -90,6 +93,8 @@ class BluepencilWindow(Adw.ApplicationWindow):
         self._asking: Gio.File | None = None
         self._password: str | None = None
         self._restarts: list[float] = []
+        #: Page sizes of the file on show, for the thumbnails.
+        self._page_sizes: list[tuple[float, float]] = []
         self._actions: dict[str, Gio.SimpleAction] = {}
         #: Rows of the recent files list, with the path each one opens.
         self._recent_rows: list[tuple[str, Adw.ActionRow]] = []
@@ -120,7 +125,7 @@ class BluepencilWindow(Adw.ApplicationWindow):
         # The open document: thumbnails beside the pages. In narrow windows
         # the thumbnails slide over the pages instead.
         self._split = Adw.OverlaySplitView(show_sidebar=False, min_sidebar_width=170, max_sidebar_width=220)
-        self._split.connect("notify::show-sidebar", self._on_sidebar_shown)
+        self._split.connect("notify::show-sidebar", weakly(self._on_sidebar_shown))
 
         self._stack = Gtk.Stack()
         self._stack.add_named(self._status, "status")
@@ -129,7 +134,8 @@ class BluepencilWindow(Adw.ApplicationWindow):
 
         self._toolbar = Adw.ToolbarView(content=self._toasts, reveal_bottom_bars=False)
         self._toolbar.add_top_bar(header)
-        self._toolbar.add_bottom_bar(self._build_bottom_bar())
+        self._bottom_bar = self._build_bottom_bar()
+        self._toolbar.add_bottom_bar(self._bottom_bar)
         self.set_content(self._toolbar)
         self._show_start()
 
@@ -138,8 +144,12 @@ class BluepencilWindow(Adw.ApplicationWindow):
         self.add_breakpoint(narrow)
         self.set_size_request(360, 400)  # windows with breakpoints need a minimum size
 
+        # Start the PDF engine while the user picks a file: loading the PDF
+        # library takes about a third of a second.
+        GLib.idle_add(self._start_engine_early)
+
         drop = Gtk.DropTarget.new(Gio.File, Gdk.DragAction.COPY)
-        drop.connect("drop", self._on_drop)
+        drop.connect("drop", weakly(self._on_drop))
         self.add_controller(drop)
         self.connect("close-request", self._on_close_request)
 
@@ -183,10 +193,15 @@ class BluepencilWindow(Adw.ApplicationWindow):
         )
         GLib.timeout_add(LOADING_DELAY_MS, self._show_loading, file)
 
+    def _start_engine_early(self) -> bool:
+        if self.get_application() is not None:  # not closed in the meantime
+            self._ensure_engine()
+        return GLib.SOURCE_REMOVE
+
     def _ensure_engine(self) -> EngineClient:
         if self._engine is None:
             self._engine = EngineClient()
-            self._engine.connect("died", self._on_engine_died)
+            self._engine.connect("died", weakly(self._on_engine_died))
         self._engine.start()
         return self._engine
 
@@ -214,22 +229,23 @@ class BluepencilWindow(Adw.ApplicationWindow):
         path = file.get_path()
         # Back to where the reader left this file last time.
         place = self._history.lookup(path)
+        size = self._expected_view_size()
         if place is not None:
-            view = DocumentView(engine, info["pages"], zoom=place.zoom, fit=place.fit, page=place.page)
+            view = DocumentView(
+                engine, info["pages"], zoom=place.zoom, fit=place.fit, page=place.page, size_hint=size
+            )
         else:
-            view = DocumentView(engine, info["pages"])
+            view = DocumentView(engine, info["pages"], size_hint=size)
         self._history.opened(path)
-        view.connect("current-page-changed", self._on_current_page_changed)
-        view.connect("zoom-changed", self._on_zoom_changed)
-        sidebar = ThumbnailSidebar(engine, info["pages"])
-        sidebar.connect("page-chosen", self._on_page_chosen)
-        sidebar.set_open(self._split.get_show_sidebar())
+        view.connect("current-page-changed", weakly(self._on_current_page_changed))
+        view.connect("zoom-changed", weakly(self._on_zoom_changed))
         self.view = view
-        self.sidebar = sidebar
         self.current_file = file
         self._password = password
+        self._page_sizes = info["pages"]
         self._split.set_content(view)
-        self._split.set_sidebar(sidebar)
+        if self._split.get_show_sidebar():
+            self._build_sidebar()
         self._stack.set_visible_child(self._split)
 
         self._title.set_subtitle(name)
@@ -237,12 +253,37 @@ class BluepencilWindow(Adw.ApplicationWindow):
         self._page_total.set_label(_("of {count}").format(count=info["page_count"]))
         self._page_entry.set_text(str(view.current_page + 1))
         self._on_zoom_changed(view)
-        sidebar.show_page(view.current_page)
         self._toolbar.set_reveal_bottom_bars(True)
         self._set_document_actions(True)
         view.focus_pages()
         if info.get("repaired"):
             self._toast(_("This file is damaged. Bluepencil repaired it for viewing; the file itself is unchanged."))
+
+    def _build_sidebar(self) -> None:
+        """Make the thumbnails, the first time they are shown for this file.
+
+        Even hidden, the list would prepare about 200 rows, which made opening
+        a file slower for people who never look at the thumbnails.
+        """
+        if self.sidebar is not None or self.view is None or self._engine is None:
+            return
+        sidebar = ThumbnailSidebar(self._engine, self._page_sizes)
+        sidebar.connect("page-chosen", weakly(self._on_page_chosen))
+        sidebar.set_open(self._split.get_show_sidebar())
+        sidebar.show_page(self.view.current_page)
+        self.sidebar = sidebar
+        self._split.set_sidebar(sidebar)
+
+    def _expected_view_size(self) -> tuple[int, int]:
+        """The size the page view will get, worked out before it is shown."""
+        width, height = self._stack.get_width(), self._stack.get_height()
+        if self._split.get_show_sidebar() and not self._split.get_collapsed():
+            fraction = self._split.get_sidebar_width_fraction()
+            low, high = self._split.get_min_sidebar_width(), self._split.get_max_sidebar_width()
+            width -= round(min(max(width * fraction, low), high))
+        if not self._toolbar.get_reveal_bottom_bars():
+            height -= self._bottom_bar.get_preferred_size()[1].height
+        return max(width, 0), max(height, 0)
 
     def _ask_password(self, file: Gio.File, wrong: bool) -> None:
         entry = Gtk.PasswordEntry(show_peek_icon=True, activates_default=True)
@@ -258,7 +299,7 @@ class BluepencilWindow(Adw.ApplicationWindow):
         dialog.set_default_response("open")
         dialog.set_close_response("cancel")
         dialog.set_extra_child(entry)
-        dialog.connect("response", self._on_password_response, file, entry)
+        dialog.connect("response", weakly(self._on_password_response), file, entry)
         self._asking = file
         dialog.present(self)
         dialog.set_focus(entry)
@@ -320,14 +361,20 @@ class BluepencilWindow(Adw.ApplicationWindow):
         self._recent_list.update_property([Gtk.AccessibleProperty.LABEL], [_("Recent Files")])
         clear = Gtk.Button(label=_("_Clear List"), use_underline=True, valign=Gtk.Align.CENTER)
         clear.add_css_class("flat")
-        clear.connect("clicked", lambda *_args: self._history.clear())
+        clear.connect("clicked", weakly(self._on_clear_recent))
         self._recent_group = Adw.PreferencesGroup(title=_("Recent Files"), header_suffix=clear)
         self._recent_group.add(self._recent_list)
         self._recent_shown = False
-        self._history_handler = self._history.connect("changed", lambda *_args: self._refresh_recent_files())
+        self._history_handler = self._history.connect("changed", weakly(self._refresh_recent_files))
         return self._recent_group
 
-    def _refresh_recent_files(self) -> None:
+    def _on_clear_recent(self, _button: Gtk.Button) -> None:
+        self._history.clear()
+
+    def _on_forget_recent(self, _button: Gtk.Button, path: str) -> None:
+        self._history.forget(path)
+
+    def _refresh_recent_files(self, *_args: object) -> None:
         entries = self._history.recent()[:RECENT_SHOWN] if self._recent_shown else []
         self._recent_list.remove_all()
         self._recent_rows = []
@@ -344,14 +391,14 @@ class BluepencilWindow(Adw.ApplicationWindow):
             )
             row.set_tooltip_text(entry.path)  # the full path, when the row cuts it short
             # "activated" covers a click, Enter, and the row's own activate().
-            row.connect("activated", self._on_recent_activated, entry.path)
+            row.connect("activated", weakly(self._on_recent_activated), entry.path)
             remove = Gtk.Button(icon_name="window-close-symbolic", valign=Gtk.Align.CENTER)
             remove.set_tooltip_text(_("Remove From List"))
             remove.update_property(
                 [Gtk.AccessibleProperty.LABEL], [_("Remove “{name}” from the list").format(name=name)]
             )
             remove.add_css_class("flat")
-            remove.connect("clicked", lambda _button, path=entry.path: self._history.forget(path))
+            remove.connect("clicked", weakly(self._on_forget_recent), entry.path)
             row.add_suffix(remove)
             self._recent_list.append(row)
             self._recent_rows.append((entry.path, row))
@@ -402,7 +449,9 @@ class BluepencilWindow(Adw.ApplicationWindow):
     def _add_actions(self) -> None:
         def add(name, callback, parameter_type=None):
             action = Gio.SimpleAction.new(name, parameter_type)
-            action.connect("activate", callback)
+            # Methods are connected weakly (see ui/weak.py); _view_action's
+            # handlers hold the window weakly themselves.
+            action.connect("activate", weakly(callback) if inspect.ismethod(callback) else callback)
             self.add_action(action)
             self._actions[name] = action
 
@@ -412,19 +461,21 @@ class BluepencilWindow(Adw.ApplicationWindow):
         add("zoom-fit-width", self._view_action(lambda view: view.fit(FitMode.WIDTH)))
         add("zoom-fit-page", self._view_action(lambda view: view.fit(FitMode.PAGE)))
         add("zoom-percent", self._on_zoom_percent, GLib.VariantType.new("i"))
-        add("go-to-page", lambda *_args: self._page_entry.grab_focus())
+        add("go-to-page", self._on_go_to_page)
         sidebar = Gio.SimpleAction.new_stateful("toggle-sidebar", None, GLib.Variant.new_boolean(False))
-        sidebar.connect("change-state", self._on_toggle_sidebar)
+        sidebar.connect("change-state", weakly(self._on_toggle_sidebar))
         self.add_action(sidebar)
         self._actions["toggle-sidebar"] = sidebar
         self._set_document_actions(False)
 
     def _view_action(self, method: Callable[[DocumentView], object]) -> Callable[..., None]:
         """An action handler that calls `method` on the page view, if any."""
+        window = weakref.ref(self)
 
         def activate(*_args: object) -> None:
-            if self.view is not None:
-                method(self.view)
+            view = getattr(window(), "view", None)
+            if view is not None:
+                method(view)
 
         return activate
 
@@ -445,7 +496,7 @@ class BluepencilWindow(Adw.ApplicationWindow):
             width_chars=4, max_width_chars=6, xalign=1.0, input_purpose=Gtk.InputPurpose.DIGITS
         )
         self._page_entry.update_property([Gtk.AccessibleProperty.LABEL], [_("Page number")])
-        self._page_entry.connect("activate", self._on_page_entry_activate)
+        self._page_entry.connect("activate", weakly(self._on_page_entry_activate))
         self._page_total = Gtk.Label()
         pages = Gtk.Box(spacing=6)
         pages.append(self._page_entry)
@@ -475,6 +526,9 @@ class BluepencilWindow(Adw.ApplicationWindow):
 
     def _toast(self, text: str) -> None:
         self._toasts.add_toast(Adw.Toast(title=GLib.markup_escape_text(text), timeout=5))
+
+    def _on_go_to_page(self, *_args: object) -> None:
+        self._page_entry.grab_focus()
 
     def _on_page_entry_activate(self, entry: Gtk.Entry) -> None:
         if self.view is None:
@@ -512,6 +566,8 @@ class BluepencilWindow(Adw.ApplicationWindow):
         # in a narrow window.
         shown = split.get_show_sidebar()
         self._actions["toggle-sidebar"].set_state(GLib.Variant.new_boolean(shown))
+        if shown:
+            self._build_sidebar()
         if self.sidebar is not None:
             self.sidebar.set_open(shown)
             if shown:

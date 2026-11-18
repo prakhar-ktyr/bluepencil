@@ -37,6 +37,7 @@ which otherwise crash GTK 4 apps at startup.
 ```
 ./dev test     # all tests
 ./dev check    # lint (ruff) and type checks (mypy)
+./dev bench    # measure speed and memory against the plan's budgets
 ```
 
 The tests run on a hidden display (`xvfb`), so no windows appear on screen.

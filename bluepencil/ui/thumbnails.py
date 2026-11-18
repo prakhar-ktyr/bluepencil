@@ -15,14 +15,14 @@ import functools
 import gi
 
 gi.require_version("Gdk", "4.0")
-gi.require_version("Gsk", "4.0")
 gi.require_version("Gtk", "4.0")
 gi.require_version("Graphene", "1.0")
-from gi.repository import Gdk, Gio, GLib, GObject, Graphene, Gsk, Gtk  # noqa: E402
+from gi.repository import Gdk, Gio, GLib, GObject, Graphene, Gtk  # noqa: E402
 
 from ..engine_client import EngineClient  # noqa: E402
 from ..i18n import _  # noqa: E402
-from .document_view import device_scale  # noqa: E402
+from .document_view import device_scale, scaling_filter  # noqa: E402
+from .weak import weakly  # noqa: E402
 
 #: Largest thumbnail, in logical pixels.
 THUMBNAIL_WIDTH = 120
@@ -82,7 +82,7 @@ class ThumbnailSheet(Gtk.Widget):
     def do_snapshot(self, snapshot: Gtk.Snapshot) -> None:
         if self.texture is not None:
             bounds = Graphene.Rect().init(0, 0, self.get_width(), self.get_height())
-            snapshot.append_scaled_texture(self.texture, Gsk.ScalingFilter.TRILINEAR, bounds)
+            snapshot.append_scaled_texture(self.texture, scaling_filter(self.texture, self), bounds)
 
 
 class ThumbnailRow(Gtk.Box):
@@ -106,7 +106,7 @@ class ThumbnailRow(Gtk.Box):
         self.update_property(
             [Gtk.AccessibleProperty.LABEL], [_("Page {number}").format(number=item.index + 1)]
         )
-        self._handler = item.connect("notify::texture", self._on_texture)
+        self._handler = item.connect("notify::texture", weakly(self._on_texture))
         self._on_texture(item)
 
     def unbind(self) -> None:
@@ -148,22 +148,23 @@ class ThumbnailSidebar(Gtk.Box):
         store = Gio.ListStore.new(PageItem)
         store.splice(0, 0, self.items)
         self._selection = Gtk.SingleSelection(model=store, autoselect=True, can_unselect=False)
-        self._selection.connect("notify::selected", self._on_selected)
+        # Handlers on things this sidebar owns are connected weakly (see weak.py).
+        self._selection.connect("notify::selected", weakly(self._on_selected))
 
         factory = Gtk.SignalListItemFactory()
-        factory.connect("setup", self._on_setup)
-        factory.connect("bind", self._on_bind)
-        factory.connect("unbind", self._on_unbind)
+        factory.connect("setup", weakly(self._on_setup))
+        factory.connect("bind", weakly(self._on_bind))
+        factory.connect("unbind", weakly(self._on_unbind))
         self._list = Gtk.ListView(model=self._selection, factory=factory, vexpand=True)
         self._list.add_css_class("navigation-sidebar")
         self._list.update_property([Gtk.AccessibleProperty.LABEL], [_("Page thumbnails")])
-        self._list.connect("activate", self._on_activate)
+        self._list.connect("activate", weakly(self._on_activate))
         self._scroller = Gtk.ScrolledWindow(child=self._list, hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
         self.append(self._scroller)
 
         adjustment = self._scroller.get_vadjustment()
-        adjustment.connect("value-changed", self._on_scrolled)
-        adjustment.connect("changed", self._on_scrolled)
+        adjustment.connect("value-changed", weakly(self._on_scrolled))
+        adjustment.connect("changed", weakly(self._on_scrolled))
         self.connect("map", self._on_scrolled)
 
     @property

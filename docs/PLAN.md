@@ -6,13 +6,15 @@ This is the working plan for the project: what the app is, every feature it
 will have, how it is built, and the order of work. Tick the checkboxes as work
 lands, and change the plan when reality disagrees with it.
 
-**Where things stand:** Milestone 0 (foundations) is nearly done and most of
-Milestone 1 (viewer) works: PDFs open and display with zoom, page navigation,
-password prompts and clear errors, and the PDF engine runs in its own process
-and recovers from crashes; a thumbnail sidebar shows every page; the start
-page lists recent files, and each file reopens at the page and zoom it was
-left at. Still to do in Milestone 1: benchmark script.
-**Next action:** `./dev bench`. Alongside it: reserve the Snap Store name.
+**Where things stand:** Milestone 0 (foundations) is nearly done and
+Milestone 1 (viewer) is built: PDFs open and display with zoom, page
+navigation, password prompts and clear errors, and the PDF engine runs in its
+own process and recovers from crashes; a thumbnail sidebar shows every page;
+the start page lists recent files, and each file reopens at the page and zoom
+it was left at. `./dev bench` measures the budgets, and all of them pass on
+the hidden display. Left in Milestone 1: checks on a real desktop.
+**Next action:** Milestone 2, organize pages, starting with the page
+operations in the engine. Alongside it: reserve the Snap Store name.
 
 ## Contents
 
@@ -494,11 +496,44 @@ Tests
 - [x] Engine process: a request and its reply; recovery after the process is
       killed
 - [x] Interface: open a generated sample, scroll, the right pages get rendered
-- [ ] `./dev bench`: a script that measures the budgets in section 7
+- [x] `./dev bench`: a script that measures the budgets in section 7
+      (`--quick` for a rough check in half a minute)
 
-Progress on 18 November 2026: 71 tests pass. On a hidden display, a 500-page
-file showed its first page 0.67–0.77 s after opening. Smooth scrolling of
-300-dpi scans and the memory cap are written but not yet measured.
+Progress on 18 November 2026: 72 tests pass. `./dev bench` on the hidden
+display, after the fixes it led to (below):
+
+| Measurement | Result | Budget |
+|---|---|---|
+| Open a 500-page file to first page visible | 0.49 s median, 0.56 s worst of 5 (was 0.86 s) | under 1 s |
+| Longest pause for Bluepencil's own work while scrolling text, scans, and text at 200 % | 6.5 ms, 5.7 ms, 15.7 ms | under 20 ms |
+| Page images in memory, scrolling 100 pages at 200 % | 255 MB | 256 MB |
+| Drawing one frame (no graphics card on the hidden display) | 20–30 ms median, up to 180 ms | none |
+
+What the benchmark found and what was done:
+
+- **Closed windows were never freed**, with every page they had rendered:
+  over 1 GB after a few files. Signal handlers on a window's own children
+  formed reference cycles that Python's garbage collector cannot see. They
+  are now connected weakly (`ui/weak.py`, rule 12), and a test checks that a
+  closed window, its pages and its thumbnails are freed.
+- **Freed memory was not returned to the system**: glibc kept freed page
+  images for reuse, so memory grew by about 200 MB per file. Large blocks now
+  go straight back (`core/memory.py`).
+- **Opening was slow** because the hidden thumbnail list prepared about 200
+  rows, the engine started only once a file was chosen, and every page was
+  laid out twice. Thumbnails are now built when first shown, the engine starts
+  with the window, and pages are fitted to the window before the first layout.
+
+Still open:
+
+- [ ] On a real desktop, check scrolling smoothness and memory. On the hidden
+      display the interface process uses about 1.3 GB, because software
+      OpenGL keeps its own copy of every page image; with the Cairo renderer
+      it stays near 340 MB.
+- [ ] Faster first layout and zoom: the view creates a widget for every page,
+      and laying out 500 of them takes about 240 ms when a file opens and again
+      after each zoom change. A view that only creates widgets for the pages on
+      screen would remove both costs.
 
 **Done when:** a 500-page file shows its first page in under a second and
 scrolls smoothly, a 300-dpi scan scrolls just as smoothly, memory stays under
@@ -770,6 +805,7 @@ file, submitted as a pull request on GitHub and reviewed by volunteers.
 | Text editing looks wrong when fonts do not match. | Scope limited to line-level fixes; the user is told when a substitute font is used. |
 | Two GTK versions: 4.14 on the development machine, 4.18 in the store build. | The compatibility floor (D8) and CI on both. |
 | A new engine version changes behaviour. | Pin the exact version; upgrade deliberately, with the whole test suite. |
+| Python's garbage collector cannot see reference cycles that pass through GTK, so windows and their page images could leak. | Handlers on a widget's own children are connected weakly (rule 12), and a test checks that closed windows are freed. |
 | One maintainer and a long feature list. | Small releases that each stand alone, the "will not be" list in section 2, and scope guards on the hard features. |
 | The name collides with a trademark. | Not checked yet. Check before 1.0, while a rename is still cheap. |
 
@@ -832,3 +868,6 @@ harder. What follows from the decision:
 10. Keep commits small, one change each, with `./dev check` and the tests
     passing.
 11. When work lands or a decision is made, update this plan.
+12. A widget connects to signals of things it owns (children, controllers,
+    adjustments) through `weakly()` from `ui/weak.py`. A plain connection
+    there keeps the widget, and everything it holds, alive forever.

@@ -27,7 +27,7 @@ def touched(sidebar) -> list[int]:
 def test_thumbnails_cost_nothing_until_the_sidebar_opens(run_app, make_pdf):
     def check(window) -> None:
         assert not window._split.get_show_sidebar()
-        assert touched(window.sidebar) == []
+        assert window.sidebar is None  # not even built
 
     run_app((loaded, check), argv=[make_pdf(pages=50)])
 
