@@ -566,7 +566,9 @@ Interface
 - [ ] Drop PDF or image files onto the grid to insert them at that position
 - [ ] "Combine files" on the start page: pick files, order them, get one document
 - [ ] Split dialog
-- [ ] Unsaved-changes marker, and Save / Discard / Cancel on close
+- [x] Unsaved-changes marker, and Save / Discard / Cancel on close (also on
+      Quit); Save, Save As, Undo, Redo, and rotate or delete the current page
+      from the menu and shortcuts; a failed save offers Save As
 
 Tests
 

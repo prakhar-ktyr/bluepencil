@@ -4,6 +4,7 @@
 
 import os
 import stat
+from pathlib import Path
 
 import pymupdf
 import pytest
@@ -125,13 +126,13 @@ def test_snapshots_are_private_and_deleted_on_close(make_pdf, tmp_path):
 
 
 def test_save_writes_the_edits_and_keeps_the_file_mode(opened):
-    path = opened.path
-    os.chmod(path, 0o640)
+    path = Path(opened.path)
+    path.chmod(0o640)
     opened.edit(lambda document: pages.delete(document, [1]))
     opened.save()
     assert labels(pymupdf.open(path)) == ["Page 1", "Page 3", "Page 4", "Page 5"]
-    assert stat.S_IMODE(os.stat(path).st_mode) == 0o640
-    assert not [name for name in os.listdir(os.path.dirname(path)) if name.endswith(".part")]
+    assert stat.S_IMODE(path.stat().st_mode) == 0o640
+    assert not list(path.parent.glob("*.part"))
 
 
 def test_save_keeps_the_password(make_pdf):
@@ -214,7 +215,7 @@ def test_without_its_snapshots_a_new_engine_starts_from_the_file(opened, tmp_pat
     opened.edit(lambda document: pages.rotate(document, [0], 90))
     history = opened.state()["history"]
     for name in history["files"]:
-        os.remove(name)
+        Path(name).unlink()
     resumed = Session.resume(opened.path, None, **history)
     assert fingerprint(resumed.document)[0][1] == 0
     assert not resumed.can_undo and not resumed.modified

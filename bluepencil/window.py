@@ -34,6 +34,13 @@ RESTART_PERIOD = 30.0
 LOADING_DELAY_MS = 300
 #: Recent files listed on the start page.
 RECENT_SHOWN = 10
+#: Engine priorities (lower goes first; page renders are 0 and up). Opening
+#: comes before anything else, and edits before renders of the old pages.
+OPEN_PRIORITY = -2
+EDIT_PRIORITY = -1
+
+#: Actions that change the document, or save it.
+_EDIT_ACTIONS = ("undo", "redo", "save", "save-as", "rotate-left", "rotate-right", "delete-page")
 
 _DOCUMENT_ACTIONS = (
     "zoom-in",
@@ -56,6 +63,18 @@ def _open_error_message(code: str | None) -> str:
         "engine-failed": _("Bluepencil’s PDF engine kept stopping while reading this file."),
     }
     return messages.get(code or "", _("Something went wrong while opening the file."))
+
+
+def _edit_error_message(code: str | None) -> str:
+    messages = {
+        "no-pages-left": _("A document needs at least one page."),
+        "no-permission": _("You don’t have permission to save in this folder. Use Save As to save a copy elsewhere."),
+        "read-only": _("This location is read-only. Use Save As to save a copy elsewhere."),
+        "disk-full": _("The disk is full. Free some space, or save the file somewhere else."),
+        "check-failed": _("The saved file could not be read back, so the original was kept as it was."),
+        "write-failed": _("The file could not be written. The original was kept as it was."),
+    }
+    return messages.get(code or "", _("That did not work, and nothing was changed."))
 
 
 def _display_name(file: Gio.File) -> str:
@@ -95,6 +114,13 @@ class BluepencilWindow(Adw.ApplicationWindow):
         self._restarts: list[float] = []
         #: Page sizes of the file on show, for the thumbnails.
         self._page_sizes: list[tuple[float, float]] = []
+        #: What the engine last said about the document: pages, history,
+        #: whether it has unsaved changes.
+        self._state: dict = {}
+        #: An edit or a save is on its way to the engine; others wait.
+        self._busy = False
+        self._close_after_save = False
+        self._discard_confirmed = False
         self._actions: dict[str, Gio.SimpleAction] = {}
         #: Rows of the recent files list, with the path each one opens.
         self._recent_rows: list[tuple[str, Adw.ActionRow]] = []
@@ -104,14 +130,7 @@ class BluepencilWindow(Adw.ApplicationWindow):
         self._title = Adw.WindowTitle(title=APP_NAME)
         header = self._build_header()
 
-        self._status = Adw.StatusPage(vexpand=True)
-        self._open_button = Gtk.Button(label=_("Open PDF…"), action_name="win.open", halign=Gtk.Align.CENTER)
-        self._open_button.add_css_class("pill")
-        self._open_button.add_css_class("suggested-action")
-        start = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=36)
-        start.append(self._open_button)
-        start.append(self._build_recent_files())
-        self._status.set_child(Adw.Clamp(maximum_size=520, child=start))
+        self._status = self._build_status_page()
 
         # The open document: thumbnails beside the pages. In narrow windows
         # the thumbnails slide over the pages instead.
@@ -181,6 +200,7 @@ class BluepencilWindow(Adw.ApplicationWindow):
             {"op": "open", "path": file.get_path(), "password": password},
             functools.partial(self._on_opened, file, password),
             key=("open",),
+            priority=OPEN_PRIORITY,
         )
         GLib.timeout_add(LOADING_DELAY_MS, self._show_loading, file)
 
@@ -215,7 +235,6 @@ class BluepencilWindow(Adw.ApplicationWindow):
             self._show_error(file, error)
 
     def _show_document(self, file: Gio.File, password: str | None, info: dict) -> None:
-        name = _display_name(file)
         engine = self._ensure_engine()
         path = file.get_path()
         # Back to where the reader left this file last time.
@@ -234,18 +253,19 @@ class BluepencilWindow(Adw.ApplicationWindow):
         self.current_file = file
         self._password = password
         self._page_sizes = info["pages"]
+        self._state = info
         self._split.set_content(view)
         if self._split.get_show_sidebar():
             self._build_sidebar()
         self._stack.set_visible_child(self._split)
 
-        self._title.set_subtitle(name)
-        self.set_title(_("{name} – Bluepencil").format(name=name))
+        self._update_title()
         self._page_total.set_label(_("of {count}").format(count=info["page_count"]))
         self._page_entry.set_text(str(view.current_page + 1))
         self._on_zoom_changed(view)
         self._toolbar.set_reveal_bottom_bars(True)
         self._set_document_actions(True)
+        self._update_edit_actions()
         view.focus_pages()
         if info.get("repaired"):
             self._toast(_("This file is damaged. Bluepencil repaired it for viewing; the file itself is unchanged."))
@@ -319,10 +339,13 @@ class BluepencilWindow(Adw.ApplicationWindow):
         self.sidebar = None
         self.current_file = None
         self._password = None
+        self._state = {}
+        self._busy = False
         self._title.set_subtitle("")
         self.set_title(APP_NAME)
         self._toolbar.set_reveal_bottom_bars(False)
         self._set_document_actions(False)
+        self._update_edit_actions()
 
     def _show_start(self) -> None:
         self._show_status(
@@ -421,19 +444,205 @@ class BluepencilWindow(Adw.ApplicationWindow):
             self._load(file, self._loading_password)
             return
         engine.start()
+        # The history lets the new engine carry on from the last edit's
+        # snapshot, with undo and redo as they were.
         engine.request(
-            {"op": "open", "path": file.get_path(), "password": self._password},
+            {"op": "open", "path": file.get_path(), "password": self._password, "history": self._state.get("history")},
             functools.partial(self._on_reopened, file),
             key=("open",),
+            priority=OPEN_PRIORITY,
         )
+        self._busy = False  # an edit on its way died with the engine
+        self._close_after_save = False
+        self._update_edit_actions()
         if self.view is not None:
             self.view.restart_rendering()
         if self.sidebar is not None:
             self.sidebar.restart_rendering()
 
     def _on_reopened(self, file: Gio.File, reply: dict, _payload: bytes) -> None:
-        if file is self.current_file and not reply.get("ok"):
+        if file is not self.current_file:
+            return
+        if not reply.get("ok"):
             self._show_error(file, reply.get("error"))
+            return
+        if reply["pages"] != self._page_sizes:
+            self._show_state(reply, self.view.current_page if self.view else 0)
+        else:
+            self._state = reply
+            self._update_title()
+            self._update_edit_actions()
+
+    # Editing
+
+    def _send(self, request: dict) -> None:
+        """Send an edit, an undo or redo, or a save; one at a time."""
+        if self._engine is None or self.current_file is None or self._busy:
+            return
+        self._busy = True
+        self._update_edit_actions()
+        # Ahead of page renders: the pages may be about to change.
+        on_reply = functools.partial(self._on_changed, self.current_file, request)
+        self._engine.request(request, on_reply, priority=EDIT_PRIORITY)
+
+    def _edit_pages(self, action: str, **arguments: object) -> None:
+        self._send({"op": "edit", "action": action, **arguments})
+
+    def _current_pages(self) -> list[int]:
+        return [self.view.current_page] if self.view is not None else []
+
+    def _on_changed(self, file: Gio.File, request: dict, reply: dict, _payload: bytes) -> None:
+        if file is not self.current_file:
+            return
+        self._busy = False
+        if not reply.get("ok"):
+            self._close_after_save = False
+            message = _edit_error_message(reply.get("error"))
+            if request["op"] == "save":
+                self._report_save_failure(message)
+            else:
+                self._toast(message)
+            self._update_edit_actions()
+            return
+        if request["op"] == "save":
+            self._on_saved(request, reply)
+            return
+        select = reply.get("select")
+        current = self.view.current_page if self.view is not None else 0
+        self._show_state(reply, select[0] if select else min(current, reply["page_count"] - 1))
+
+    def _show_state(self, state: dict, page: int) -> None:
+        """Show the document as the engine now has it, at `page`."""
+        old = self.view
+        engine = self._ensure_engine()
+        if old is not None:
+            zoom, fit, size = old.zoom, old.fit_mode, (old.get_width(), old.get_height())
+        else:
+            zoom, fit, size = 1.0, FitMode.WIDTH, self._expected_view_size()
+        view = DocumentView(engine, state["pages"], zoom=zoom, fit=fit, page=page, size_hint=size)
+        view.connect("current-page-changed", weakly(self._on_current_page_changed))
+        view.connect("zoom-changed", weakly(self._on_zoom_changed))
+        self.view = view
+        self._state = state
+        self._page_sizes = state["pages"]
+        self._split.set_content(view)
+        if self.sidebar is not None:
+            self._split.set_sidebar(None)
+            self.sidebar = None
+            if self._split.get_show_sidebar():
+                self._build_sidebar()
+        self._page_total.set_label(_("of {count}").format(count=state["page_count"]))
+        self._page_entry.set_text(str(view.current_page + 1))
+        self._on_zoom_changed(view)
+        self._update_title()
+        self._update_edit_actions()
+        view.focus_pages()
+
+    def _update_title(self) -> None:
+        if self.current_file is None:
+            return
+        name = _display_name(self.current_file)
+        if self._state.get("modified"):
+            # The dot says "not saved", as in other GNOME apps.
+            self._title.set_subtitle(f"• {name}")
+            self.set_title(_("• {name} – Bluepencil").format(name=name))
+        else:
+            self._title.set_subtitle(name)
+            self.set_title(_("{name} – Bluepencil").format(name=name))
+
+    def _update_edit_actions(self) -> None:
+        ready = self.current_file is not None and not self._busy
+        enabled = {
+            "undo": ready and bool(self._state.get("can_undo")),
+            "redo": ready and bool(self._state.get("can_redo")),
+            "save": ready and bool(self._state.get("modified")),
+            "save-as": ready,
+            "rotate-left": ready,
+            "rotate-right": ready,
+            "delete-page": ready,
+        }
+        for name, value in enabled.items():
+            self._actions[name].set_enabled(value)
+
+    # Saving
+
+    def _on_save(self, *_args: object) -> None:
+        self._send({"op": "save"})
+
+    def _on_save_as(self, *_args: object) -> None:
+        if self.current_file is None:
+            return
+        dialog = Gtk.FileDialog(title=_("Save As"), modal=True, initial_name=_display_name(self.current_file))
+        folder = self.current_file.get_parent()
+        if folder is not None:
+            dialog.set_initial_folder(folder)
+        dialog.save(self, None, weakly(self._on_save_as_chosen))
+
+    def _on_save_as_chosen(self, dialog: Gtk.FileDialog, result: Gio.AsyncResult) -> None:
+        try:
+            file = dialog.save_finish(result)
+        except GLib.Error as error:
+            if not error.matches(Gtk.dialog_error_quark(), Gtk.DialogError.DISMISSED):
+                self._toast(_("Could not save the file: {reason}").format(reason=error.message))
+            return
+        if file is not None and file.get_path() is not None:
+            self.save_as(file)
+
+    def save_as(self, file: Gio.File) -> None:
+        """Save the document to `file` and carry on working there."""
+        path = file.get_path()
+        if not path.lower().endswith(".pdf"):
+            path += ".pdf"
+        self._send({"op": "save", "path": path})
+
+    def _on_saved(self, request: dict, reply: dict) -> None:
+        if request.get("path"):
+            self.current_file = Gio.File.new_for_path(request["path"])
+            self._history.opened(request["path"])
+        self._state = {**self._state, **reply}
+        self._update_title()
+        self._update_edit_actions()
+        if self._close_after_save:
+            self._discard_confirmed = True
+            self.close()
+
+    def _report_save_failure(self, message: str) -> None:
+        dialog = Adw.AlertDialog(heading=_("Could Not Save"), body=message)
+        dialog.add_response("close", _("_Close"))
+        dialog.add_response("save-as", _("Save _As…"))
+        dialog.set_response_appearance("save-as", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("save-as")
+        dialog.set_close_response("close")
+        dialog.connect("response", weakly(self._on_save_failure_response))
+        dialog.present(self)
+
+    def _on_save_failure_response(self, _dialog: Adw.AlertDialog, response: str) -> None:
+        if response == "save-as":
+            self._on_save_as()
+
+    def _ask_to_save_before_closing(self) -> None:
+        name = _display_name(self.current_file) if self.current_file else ""
+        dialog = Adw.AlertDialog(
+            heading=_("Save Changes?"),
+            body=_("“{name}” has changes that are not saved. If you don’t save, they are lost.").format(name=name),
+        )
+        dialog.add_response("cancel", _("_Cancel"))
+        dialog.add_response("discard", _("_Discard"))
+        dialog.add_response("save", _("_Save"))
+        dialog.set_response_appearance("discard", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("save")
+        dialog.set_close_response("cancel")
+        dialog.connect("response", weakly(self._on_close_response))
+        dialog.present(self)
+
+    def _on_close_response(self, _dialog: Adw.AlertDialog, response: str) -> None:
+        if response == "discard":
+            self._discard_confirmed = True
+            self.close()
+        elif response == "save":
+            self._close_after_save = True
+            self._on_save()
 
     # Controls
 
@@ -453,11 +662,34 @@ class BluepencilWindow(Adw.ApplicationWindow):
         add("zoom-fit-page", self._view_action(lambda view: view.fit(FitMode.PAGE)))
         add("zoom-percent", self._on_zoom_percent, GLib.VariantType.new("i"))
         add("go-to-page", self._on_go_to_page)
+        add("save", self._on_save)
+        add("save-as", self._on_save_as)
+        add("undo", self._on_undo)
+        add("redo", self._on_redo)
+        add("rotate-left", self._on_rotate_left)
+        add("rotate-right", self._on_rotate_right)
+        add("delete-page", self._on_delete_page)
         sidebar = Gio.SimpleAction.new_stateful("toggle-sidebar", None, GLib.Variant.new_boolean(False))
         sidebar.connect("change-state", weakly(self._on_toggle_sidebar))
         self.add_action(sidebar)
         self._actions["toggle-sidebar"] = sidebar
         self._set_document_actions(False)
+        self._update_edit_actions()
+
+    def _on_undo(self, *_args: object) -> None:
+        self._send({"op": "undo"})
+
+    def _on_redo(self, *_args: object) -> None:
+        self._send({"op": "redo"})
+
+    def _on_rotate_left(self, *_args: object) -> None:
+        self._edit_pages("rotate", pages=self._current_pages(), degrees=-90)
+
+    def _on_rotate_right(self, *_args: object) -> None:
+        self._edit_pages("rotate", pages=self._current_pages(), degrees=90)
+
+    def _on_delete_page(self, *_args: object) -> None:
+        self._edit_pages("delete", pages=self._current_pages())
 
     def _view_action(self, method: Callable[[DocumentView], object]) -> Callable[..., None]:
         """An action handler that calls `method` on the page view, if any."""
@@ -474,6 +706,16 @@ class BluepencilWindow(Adw.ApplicationWindow):
         for name in _DOCUMENT_ACTIONS:
             self._actions[name].set_enabled(enabled)
 
+    def _build_status_page(self) -> Adw.StatusPage:
+        """The start page, which also shows "Opening…" and errors."""
+        self._open_button = Gtk.Button(label=_("Open PDF…"), action_name="win.open", halign=Gtk.Align.CENTER)
+        self._open_button.add_css_class("pill")
+        self._open_button.add_css_class("suggested-action")
+        start = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=36)
+        start.append(self._open_button)
+        start.append(self._build_recent_files())
+        return Adw.StatusPage(vexpand=True, child=Adw.Clamp(maximum_size=520, child=start))
+
     def _build_header(self) -> Adw.HeaderBar:
         header = Adw.HeaderBar(title_widget=self._title)
         header.pack_start(
@@ -485,12 +727,27 @@ class BluepencilWindow(Adw.ApplicationWindow):
         )
         header.pack_start(Gtk.Button(label=_("Open"), action_name="win.open", tooltip_text=_("Open a PDF")))
         header.pack_end(self._build_menu_button())
+        self._save_button = Gtk.Button(label=_("Save"), action_name="win.save", tooltip_text=_("Save (Ctrl+S)"))
+        self._save_button.add_css_class("suggested-action")
+        header.pack_end(self._save_button)
         return header
 
     def _build_menu_button(self) -> Gtk.MenuButton:
+        files = Gio.Menu()
+        files.append(_("Save As…"), "win.save-as")
+        edits = Gio.Menu()
+        edits.append(_("Undo"), "win.undo")
+        edits.append(_("Redo"), "win.redo")
+        page = Gio.Menu()
+        page.append(_("Rotate Page Left"), "win.rotate-left")
+        page.append(_("Rotate Page Right"), "win.rotate-right")
+        page.append(_("Delete Page"), "win.delete-page")
+        app = Gio.Menu()
+        app.append(_("About {name}").format(name=APP_NAME), "app.about")
+        app.append(_("Quit"), "app.quit")
         menu = Gio.Menu()
-        menu.append(_("About {name}").format(name=APP_NAME), "app.about")
-        menu.append(_("Quit"), "app.quit")
+        for section in (files, edits, page, app):
+            menu.append_section(None, section)
         return Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu, tooltip_text=_("Main Menu"))
 
     def _build_bottom_bar(self) -> Gtk.ActionBar:
@@ -597,6 +854,10 @@ class BluepencilWindow(Adw.ApplicationWindow):
         return True
 
     def _on_close_request(self, _window: Gtk.Window) -> bool:
+        if self._state.get("modified") and not self._discard_confirmed:
+            if not self._busy:
+                self._ask_to_save_before_closing()
+            return True  # not yet: the user decides first
         self.shutdown()
         return False
 

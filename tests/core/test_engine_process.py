@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The engine as its own process, spoken to through the message protocol."""
 
-import os
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -91,7 +91,7 @@ def test_edits_survive_the_engine_being_killed(make_pdf):
         reply, _ = ask(second, {"op": "quit", "id": 3})
         assert second.wait(timeout=5) == 0
     # A clean exit deletes the snapshots.
-    assert not any(os.path.exists(name) for name in history["files"])
+    assert not any(Path(name).exists() for name in history["files"])
 
 
 def test_a_refused_edit_says_why(engine, make_pdf):

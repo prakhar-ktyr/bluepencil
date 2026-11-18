@@ -25,6 +25,12 @@ _SHORTCUTS = {
     "win.zoom-fit-width": ["<primary>0"],
     "win.go-to-page": ["<primary>l"],
     "win.toggle-sidebar": ["F9"],
+    "win.save": ["<primary>s"],
+    "win.save-as": ["<primary><shift>s"],
+    "win.undo": ["<primary>z"],
+    "win.redo": ["<primary><shift>z", "<primary>y"],
+    "win.rotate-left": ["<primary>bracketleft"],
+    "win.rotate-right": ["<primary>bracketright"],
 }
 
 
@@ -53,7 +59,7 @@ class BluepencilApplication(Adw.Application):
         #: Recent files and where the reader left each one, for every window.
         self.history = History()
         self._add_action("about", self._on_about)
-        self._add_action("quit", lambda *_args: self.quit(), ["<primary>q"])
+        self._add_action("quit", self._on_quit, ["<primary>q"])
         for action, shortcuts in _SHORTCUTS.items():
             self.set_accels_for_action(action, shortcuts)
 
@@ -99,6 +105,12 @@ class BluepencilApplication(Adw.Application):
         self.add_action(action)
         if shortcuts:
             self.set_accels_for_action(f"app.{name}", shortcuts)
+
+    def _on_quit(self, *_args: object) -> None:
+        # Closing each window lets those with unsaved changes ask first; the
+        # app ends when the last one has closed.
+        for window in list(self.get_windows()):
+            window.close()
 
     def _on_about(self, *_args: object) -> None:
         build_about_dialog().present(self.props.active_window)
