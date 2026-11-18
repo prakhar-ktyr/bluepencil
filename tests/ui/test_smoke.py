@@ -13,6 +13,9 @@ from bluepencil.application import build_about_dialog  # noqa: E402
 
 def test_app_id_is_valid() -> None:
     assert Gio.Application.id_is_valid(APP_ID)
+    # Hyphens are allowed by GLib but not inside a D-Bus name's middle parts,
+    # which is how desktops and Flathub use the ID.
+    assert "-" not in APP_ID and "USERNAME" not in APP_ID
 
 
 def test_window_starts_empty(run_app) -> None:

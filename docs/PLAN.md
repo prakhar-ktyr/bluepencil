@@ -11,8 +11,8 @@ Milestone 1 (viewer) works: PDFs open and display with zoom, page navigation,
 password prompts and clear errors, and the PDF engine runs in its own process
 and recovers from crashes. Still to do in Milestone 1: thumbnail sidebar,
 start page with recent files, remembering page and zoom, benchmark script.
-**Next action:** the thumbnail sidebar. Alongside it: push the repository to
-GitHub and reserve the Snap Store name.
+**Next action:** the thumbnail sidebar. Alongside it: reserve the Snap Store
+name.
 
 ## Contents
 
@@ -439,7 +439,8 @@ release. Anything risky gets a small experiment before its milestone starts.
 - [x] Decision 1: open source, AGPL-3.0-or-later (18 November 2026)
 - [x] Licence: `LICENSE` file, a two-line licence header in every source file,
       copyright and licence shown in the About window
-- [ ] Push to GitHub and replace `USERNAME` in the app ID
+- [x] Push to GitHub (github.com/prakhar-ktyr/bluepencil) and set the app ID
+      to `io.github.prakhar_ktyr.Bluepencil` (18 November 2026)
 - [ ] Before accepting any outside code: set up a contributor licence
       agreement (for example the free CLA Assistant app on GitHub)
 - [ ] Reserve the name `bluepencil` on the Snap Store
