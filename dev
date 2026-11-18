@@ -8,6 +8,7 @@
 #   ./dev [run] [file.pdf] start the app from source
 #   ./dev test [args]      run the tests on a hidden display
 #   ./dev check            lint and type checks
+#   ./dev bench [--quick]  measure the performance budgets (plan, section 7)
 #
 # It exists because three things break a plain `python3 -m bluepencil`:
 #   1. VS Code installed as a snap passes its own GTK settings to every
@@ -74,6 +75,12 @@ case "$command" in
             exec "$PYTHON" -m pytest "$@"
         fi
         ;;
+    bench)
+        # The same hidden display as the tests, so the numbers are comparable
+        # from one run to the next.
+        GDK_BACKEND=x11 exec xvfb-run -a -s "-screen 0 1280x800x24" \
+            "$PYTHON" bench/run.py "$@"
+        ;;
     check)
         if ! "$PYTHON" -c 'import ruff, mypy' 2>/dev/null; then
             echo "The checkers are not installed. Run: ./dev setup" >&2
@@ -81,13 +88,13 @@ case "$command" in
         fi
         status=0
         echo "Lint (ruff):"
-        "$PYTHON" -m ruff check bluepencil tests || status=1
+        "$PYTHON" -m ruff check bluepencil tests bench || status=1
         echo "Types (mypy):"
         "$PYTHON" -m mypy || status=1
         exit $status
         ;;
     *)
-        echo "Unknown command: $command (use setup, run, test or check)" >&2
+        echo "Unknown command: $command (use setup, run, test, check or bench)" >&2
         exit 2
         ;;
 esac

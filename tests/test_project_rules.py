@@ -23,7 +23,7 @@ def _imports(path: Path) -> set[str]:
 
 
 def test_every_source_file_starts_with_the_licence_lines():
-    sources = [*PACKAGE.rglob("*.py"), *(ROOT / "tests").rglob("*.py"), ROOT / "dev"]
+    sources = [*PACKAGE.rglob("*.py"), *(ROOT / "tests").rglob("*.py"), *(ROOT / "bench").rglob("*.py"), ROOT / "dev"]
     missing = [
         str(path.relative_to(ROOT))
         for path in sources
