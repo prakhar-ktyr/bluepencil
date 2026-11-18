@@ -14,9 +14,11 @@ os.environ["GSETTINGS_BACKEND"] = "memory"
 
 @pytest.fixture(autouse=True)
 def private_state(tmp_path, monkeypatch):
-    """Keep the app's state, such as recent files, inside each test's folder."""
+    """Keep the app's state and cache, such as recent files and snapshots,
+    inside each test's folder."""
     state = tmp_path / "state"
     monkeypatch.setenv("XDG_STATE_HOME", str(state))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     return state
 
 

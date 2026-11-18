@@ -543,11 +543,20 @@ the cap, and killing the engine process loses nothing.
 
 Engine
 
-- [ ] Page operations: rotate, delete, duplicate, move, extract, insert a blank
-      page, insert pages from another PDF, insert an image as a page
-- [ ] Split by page ranges and every N pages
-- [ ] History: snapshots, undo, redo, limits, grouping of rapid edits (D4)
-- [ ] Save and Save As (D5); recovery copy offered after a crash
+- [x] Page operations: rotate, delete, duplicate, move, extract, insert a blank
+      page, insert pages from another PDF (with its bookmarks), insert an image
+      as a page (photos are scaled down to A4) — `core/pages.py`
+- [x] Split by page ranges and every N pages; page ranges typed as "1-3, 5, 8-"
+- [x] History: snapshots, undo, redo, limits (D4) — `core/session.py`.
+      Grouping of rapid edits waits for annotations, the first edits that come
+      in quick succession.
+- [x] Save and Save As (D5): written next to the original, flushed to disk,
+      reopened and checked, then put in its place; passwords, file
+      permissions and links kept. PyMuPDF drops a file's password on save
+      unless told to keep it, so every write passes `KEEP_ENCRYPTION`.
+- [x] If the engine dies, a new one carries on from its snapshots, edits and
+      history included
+- [ ] Recovery copy offered after the whole app stops unexpectedly
 
 Interface
 

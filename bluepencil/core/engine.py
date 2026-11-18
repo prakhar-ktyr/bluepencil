@@ -12,51 +12,138 @@ import contextlib
 import os
 import signal
 import sys
+from collections.abc import Callable
 from typing import IO
 
 import pymupdf
 
-from . import protocol
-from .document import OpenError, describe, open_document
+from . import pages, protocol
+from .document import OpenError
 from .memory import release_memory_promptly
+from .pages import PageError
 from .render import render_page
+from .session import SaveError, Session
+
+#: Edits by name: each takes the document and the request, changes the
+#: document, and returns the pages to select.
+EDITS: dict[str, Callable[[pymupdf.Document, dict], list[int]]] = {
+    "rotate": lambda document, request: pages.rotate(document, request["pages"], request["degrees"]),
+    "delete": lambda document, request: pages.delete(document, request["pages"]),
+    "duplicate": lambda document, request: pages.duplicate(document, request["pages"]),
+    "move": lambda document, request: pages.move(document, request["pages"], request["to"]),
+    "insert-blank": lambda document, request: pages.insert_blank(document, request["at"]),
+    "insert-pdf": lambda document, request: pages.insert_pdf(
+        document, request["path"], request["at"], request.get("password")
+    ),
+    "insert-image": lambda document, request: pages.insert_image(document, request["path"], request["at"]),
+}
+
+
+def _failure(error: OpenError | PageError | SaveError) -> tuple[dict, bytes]:
+    return {"ok": False, "error": error.code, "detail": str(error)}, b""
 
 
 class Engine:
     """Answers requests, one at a time, about one document."""
 
     def __init__(self) -> None:
-        self.document: pymupdf.Document | None = None
+        self.session: Session | None = None
+        #: Requests about the open document, by name.
+        self._handlers: dict[str, Callable[[Session, dict], tuple[dict, bytes]]] = {
+            "render": self._render,
+            "edit": self._edit,
+            "undo": self._undo,
+            "redo": self._redo,
+            "save": self._save,
+            "extract": self._extract,
+            "split": self._split,
+        }
 
     def handle(self, request: dict) -> tuple[dict, bytes]:
         op = request.get("op")
         if op == "open":
-            return self._open(request["path"], request.get("password"))
-        if op == "render":
-            if self.document is None:
-                return {"ok": False, "error": "no-document"}, b""
-            info, pixels = render_page(
-                self.document, request["page"], request["scale"], request.get("clip")
-            )
-            return {"ok": True, "page": request["page"], **info}, pixels
+            return self._open(request)
         if op == "ping":
             return {"ok": True}, b""
-        return {"ok": False, "error": "unknown-request", "detail": str(op)}, b""
-
-    def _open(self, path: str, password: str | None) -> tuple[dict, bytes]:
-        if self.document is not None:
-            self.document.close()
-            self.document = None
+        handler = self._handlers.get(str(op))
+        if handler is None:
+            return {"ok": False, "error": "unknown-request", "detail": str(op)}, b""
+        if self.session is None:
+            return {"ok": False, "error": "no-document"}, b""
         try:
-            self.document = open_document(path, password)
+            return handler(self.session, request)
+        except (OpenError, PageError, SaveError) as error:
+            return _failure(error)
+
+    def _render(self, session: Session, request: dict) -> tuple[dict, bytes]:
+        info, pixels = render_page(session.document, request["page"], request["scale"], request.get("clip"))
+        return {"ok": True, "page": request["page"], **info}, pixels
+
+    def _edit(self, session: Session, request: dict) -> tuple[dict, bytes]:
+        change = EDITS.get(str(request.get("action")))
+        if change is None:
+            return {"ok": False, "error": "unknown-request", "detail": str(request.get("action"))}, b""
+        selection = session.edit(lambda document: change(document, request))
+        return {"ok": True, "select": selection, **session.state()}, b""
+
+    def _undo(self, session: Session, _request: dict) -> tuple[dict, bytes]:
+        session.undo()
+        return {"ok": True, **session.state()}, b""
+
+    def _redo(self, session: Session, _request: dict) -> tuple[dict, bytes]:
+        session.redo()
+        return {"ok": True, **session.state()}, b""
+
+    def _save(self, session: Session, request: dict) -> tuple[dict, bytes]:
+        session.save(request.get("path"))
+        return {"ok": True, **session.state()}, b""
+
+    def _extract(self, session: Session, request: dict) -> tuple[dict, bytes]:
+        pages.extract(session.document, request["pages"], request["path"], session.password)
+        return {"ok": True}, b""
+
+    def _split(self, session: Session, request: dict) -> tuple[dict, bytes]:
+        written = pages.split(session.document, request["groups"], request["folder"], request["stem"], session.password)
+        return {"ok": True, "paths": written}, b""
+
+    def close(self) -> None:
+        if self.session is not None:
+            self.session.close()
+            self.session = None
+
+    def _open(self, request: dict) -> tuple[dict, bytes]:
+        """Open a file, or carry on from the snapshots of an engine that stopped."""
+        self.close()
+        path, password, history = request["path"], request.get("password"), request.get("history")
+        try:
+            if history:
+                self.session = Session.resume(
+                    path,
+                    password,
+                    folder=history["folder"],
+                    files=history["files"],
+                    position=history["position"],
+                    saved_position=history["saved_position"],
+                )
+            else:
+                self.session = Session(path, password)
         except OpenError as error:
-            return {"ok": False, "error": error.code, "detail": error.detail}, b""
-        return {"ok": True, **describe(self.document)}, b""
+            return _failure(error)
+        return {"ok": True, **self.session.state()}, b""
 
 
 def serve(requests: IO[bytes], replies: IO[bytes]) -> None:
     """Answer requests until asked to quit or the interface goes away."""
     engine = Engine()
+    try:
+        _answer(engine, requests, replies)
+    finally:
+        # Snapshots are kept only if the process dies without getting here:
+        # then they are what a new engine carries on from.
+        engine.close()
+
+
+def _answer(engine: Engine, requests: IO[bytes], replies: IO[bytes]) -> None:
     while (message := protocol.read_message(requests)) is not None:
         request, _payload = message
         if request.get("op") == "quit":

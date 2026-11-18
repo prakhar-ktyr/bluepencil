@@ -102,16 +102,7 @@ class BluepencilWindow(Adw.ApplicationWindow):
         self._add_actions()
 
         self._title = Adw.WindowTitle(title=APP_NAME)
-        header = Adw.HeaderBar(title_widget=self._title)
-        header.pack_start(
-            Gtk.ToggleButton(
-                icon_name="sidebar-show-symbolic",
-                action_name="win.toggle-sidebar",
-                tooltip_text=_("Page Thumbnails (F9)"),
-            )
-        )
-        header.pack_start(Gtk.Button(label=_("Open"), action_name="win.open", tooltip_text=_("Open a PDF")))
-        header.pack_end(self._build_menu_button())
+        header = self._build_header()
 
         self._status = Adw.StatusPage(vexpand=True)
         self._open_button = Gtk.Button(label=_("Open PDF…"), action_name="win.open", halign=Gtk.Align.CENTER)
@@ -482,6 +473,19 @@ class BluepencilWindow(Adw.ApplicationWindow):
     def _set_document_actions(self, enabled: bool) -> None:
         for name in _DOCUMENT_ACTIONS:
             self._actions[name].set_enabled(enabled)
+
+    def _build_header(self) -> Adw.HeaderBar:
+        header = Adw.HeaderBar(title_widget=self._title)
+        header.pack_start(
+            Gtk.ToggleButton(
+                icon_name="sidebar-show-symbolic",
+                action_name="win.toggle-sidebar",
+                tooltip_text=_("Page Thumbnails (F9)"),
+            )
+        )
+        header.pack_start(Gtk.Button(label=_("Open"), action_name="win.open", tooltip_text=_("Open a PDF")))
+        header.pack_end(self._build_menu_button())
+        return header
 
     def _build_menu_button(self) -> Gtk.MenuButton:
         menu = Gio.Menu()

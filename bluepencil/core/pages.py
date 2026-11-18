@@ -186,8 +186,8 @@ def parse_ranges(text: str, page_count: int) -> list[list[int]]:
     pages counted from 0. Raises ValueError if any part is not a range of
     pages that exist."""
     groups = []
-    for part in text.replace(";", ",").split(","):
-        part = part.strip().replace("–", "-")
+    for raw in text.replace(";", ",").split(","):
+        part = raw.strip().replace("–", "-")
         if not part:
             continue
         first, dash, last = part.partition("-")
