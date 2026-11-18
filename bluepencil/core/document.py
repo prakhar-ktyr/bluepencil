@@ -17,6 +17,11 @@ WRONG_PASSWORD = "wrong-password"
 NO_PAGES = "no-pages"
 
 
+#: Pass as `encryption` whenever a document is written. PyMuPDF's default is
+#: no encryption, which would silently remove a file's password.
+KEEP_ENCRYPTION = pymupdf.mupdf.PDF_ENCRYPT_KEEP
+
+
 class OpenError(Exception):
     def __init__(self, code: str, detail: str = "") -> None:
         super().__init__(f"{code}: {detail}" if detail else code)
