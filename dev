@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Prakhar Katiyar
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
 # Developer helper for Bluepencil.
 #
 #   ./dev setup            one-time: create .venv with the test tools

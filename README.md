@@ -35,10 +35,20 @@ which otherwise crash GTK 4 apps at startup.
 
 The tests run on a hidden display (`xvfb`), so no windows appear on screen.
 
-## Planned features
+## Plan
 
-- Viewer with page thumbnails and search
-- Page organizing: merge, split, reorder, rotate, delete
-- Annotations, form filling and signing
-- Compression
-- Later: redaction, OCR, text editing, comparing two PDFs, converting
+The full plan (features, design, milestones and decisions) is in
+[docs/PLAN.md](docs/PLAN.md). In short:
+
+- **0.1:** read PDFs, organize pages (merge, split, reorder, rotate), compress
+- **1.0:** search, copy text, print, annotate, fill forms and sign
+- **2.0:** redaction, OCR, watermarks, passwords, text fixes, batch recipes
+- **Later:** compare, extract, convert, scan from photos, read aloud
+
+## Licence
+
+Bluepencil is free software: you can redistribute it and modify it under the
+terms of the GNU Affero General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option) any
+later version. It comes with no warranty. See [LICENSE](LICENSE) for the full
+text.

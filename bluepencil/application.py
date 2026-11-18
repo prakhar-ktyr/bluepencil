@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Prakhar Katiyar
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The application object: owns the window, app-wide actions and shortcuts."""
 
 from collections.abc import Callable
@@ -8,8 +10,28 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, Gtk  # noqa: E402
 
-from . import APP_ID, APP_NAME, APP_SUMMARY, VERSION  # noqa: E402
+from . import APP_ID, APP_NAME, APP_SUMMARY, COPYRIGHT, VERSION  # noqa: E402
 from .window import BluepencilWindow  # noqa: E402
+
+
+def build_about_dialog(parent: Gtk.Window | None) -> Gtk.AboutDialog:
+    """The About window.
+
+    It also carries the notice the AGPL asks interactive programs to show:
+    the copyright, that there is no warranty, and which licence applies.
+    """
+    # Gtk.AboutDialog, not Adw.AboutWindow: Ubuntu 22.04 ships
+    # libadwaita 1.1 and AboutWindow needs 1.2.
+    return Gtk.AboutDialog(
+        transient_for=parent,
+        modal=True,
+        program_name=APP_NAME,
+        version=VERSION,
+        comments=APP_SUMMARY,
+        copyright=COPYRIGHT,
+        license_type=Gtk.License.AGPL_3_0,
+        logo_icon_name="x-office-document",
+    )
 
 
 class BluepencilApplication(Adw.Application):
@@ -52,14 +74,4 @@ class BluepencilApplication(Adw.Application):
             self.set_accels_for_action(f"app.{name}", shortcuts)
 
     def _on_about(self, *_args: object) -> None:
-        # Gtk.AboutDialog, not Adw.AboutWindow: Ubuntu 22.04 ships
-        # libadwaita 1.1 and AboutWindow needs 1.2.
-        about = Gtk.AboutDialog(
-            transient_for=self.props.active_window,
-            modal=True,
-            program_name=APP_NAME,
-            version=VERSION,
-            comments=APP_SUMMARY,
-            logo_icon_name="x-office-document",
-        )
-        about.present()
+        build_about_dialog(self.props.active_window).present()

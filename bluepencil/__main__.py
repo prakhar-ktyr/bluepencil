@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Prakhar Katiyar
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Entry point: `python3 -m bluepencil [file.pdf]`."""
 
 import sys

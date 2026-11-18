@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Prakhar Katiyar
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The main window: header bar, Open button and the document area.
 
 Written against GTK 4.6 and libadwaita 1.1 (Ubuntu 22.04), so it avoids

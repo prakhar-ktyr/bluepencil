@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Prakhar Katiyar
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Smoke tests: the app starts, shows its window and reacts to a file.
 
 They need a display; `./dev test` runs them on a hidden one.
@@ -9,10 +11,13 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gio, GLib  # noqa: E402
+from gi.repository import Gio, GLib, Gtk  # noqa: E402
 
-from bluepencil import APP_ID, APP_NAME  # noqa: E402
-from bluepencil.application import BluepencilApplication  # noqa: E402
+from bluepencil import APP_ID, APP_NAME, COPYRIGHT  # noqa: E402
+from bluepencil.application import (  # noqa: E402
+    BluepencilApplication,
+    build_about_dialog,
+)
 from bluepencil.window import BluepencilWindow  # noqa: E402
 
 
@@ -72,6 +77,19 @@ def test_pdf_from_command_line_is_opened(tmp_path) -> None:
         assert window._title.get_subtitle() == "Contract draft.pdf"
 
     run_app(check, [str(pdf)])
+
+
+def test_about_window_shows_the_licence() -> None:
+    def check(window: BluepencilWindow) -> None:
+        about = build_about_dialog(window)
+        try:
+            assert about.get_license_type() == Gtk.License.AGPL_3_0
+            assert about.get_copyright() == COPYRIGHT
+            assert about.get_program_name() == APP_NAME
+        finally:
+            about.destroy()
+
+    run_app(check)
 
 
 def test_non_pdf_is_rejected(tmp_path) -> None:
