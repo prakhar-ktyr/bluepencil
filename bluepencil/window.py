@@ -22,6 +22,7 @@ from .history import History  # noqa: E402
 from .i18n import _  # noqa: E402
 from .ui.document_view import DocumentView, FitMode  # noqa: E402
 from .ui.organize import OrganizeView  # noqa: E402
+from .ui.split_dialog import SplitDialog  # noqa: E402
 from .ui.thumbnails import ThumbnailSidebar  # noqa: E402
 from .ui.weak import weakly  # noqa: E402
 
@@ -71,6 +72,8 @@ def _open_error_message(code: str | None) -> str:
         "not-pdf": _("The file isn’t a PDF, even though its name may say so."),
         "no-pages": _("The file has no pages."),
         "engine-failed": _("Bluepencil’s PDF engine kept stopping while reading this file."),
+        "unsupported-file": _("Only PDFs and pictures can be combined."),
+        "needs-password": _("One of the files is password-protected. Open it first, and extract its pages."),
     }
     return messages.get(code or "", _("Something went wrong while opening the file."))
 
@@ -92,6 +95,14 @@ def _edit_error_message(code: str | None) -> str:
 
 def _display_name(file: Gio.File) -> str:
     return file.get_basename() or _("Untitled")
+
+
+def _free_path(folder: Path, stem: str) -> Path:
+    """`folder/stem.pdf`, or `stem (2).pdf` and so on if that is taken."""
+    path, number = folder / f"{stem}.pdf", 2
+    while path.exists():
+        path, number = folder / f"{stem} ({number}).pdf", number + 1
+    return path
 
 
 def _display_folder(path: str) -> str:
@@ -227,6 +238,47 @@ class BluepencilWindow(Adw.ApplicationWindow):
             self._ensure_engine()
         return GLib.SOURCE_REMOVE
 
+    def combine_files(self, paths: list[str]) -> None:
+        """Make a new document from these PDFs and pictures, in this order."""
+        if not paths:
+            return
+        target = _free_path(Path(paths[0]).parent, _("Combined"))
+        file = Gio.File.new_for_path(str(target))
+        self._restarts = []
+        self._loading = file
+        self._loading_password = None
+        self._ensure_engine().request(
+            {"op": "combine", "paths": paths, "path": str(target)},
+            functools.partial(self._on_opened, file, None),
+            key=("open",),
+            priority=OPEN_PRIORITY,
+        )
+        GLib.timeout_add(LOADING_DELAY_MS, self._show_loading, file)
+
+    def _on_combine_clicked(self, *_args: object) -> None:
+        accepted = Gtk.FileFilter(name=_("PDFs and pictures"))
+        accepted.add_mime_type("application/pdf")
+        accepted.add_pixbuf_formats()
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(accepted)
+        dialog = Gtk.FileDialog(title=_("Combine Files"), modal=True, filters=filters)
+        dialog.open_multiple(self, None, weakly(self._on_combine_chosen))
+
+    def _on_combine_chosen(self, dialog: Gtk.FileDialog, result: Gio.AsyncResult) -> None:
+        try:
+            files = dialog.open_multiple_finish(result)
+        except GLib.Error:
+            return  # closed without choosing
+        paths = [file.get_path() for file in files if file.get_path() is not None]
+        if not paths:
+            return
+        if self.is_empty:
+            self.combine_files(paths)
+        else:
+            window = type(self)(application=self.get_application())
+            window.present()
+            window.combine_files(paths)
+
     def _ensure_engine(self) -> EngineClient:
         if self._engine is None:
             self._engine = EngineClient()
@@ -264,7 +316,8 @@ class BluepencilWindow(Adw.ApplicationWindow):
             )
         else:
             view = DocumentView(engine, info["pages"], size_hint=size)
-        self._history.opened(path)
+        if not info.get("untitled"):
+            self._history.opened(path)
         view.connect("current-page-changed", weakly(self._on_current_page_changed))
         view.connect("zoom-changed", weakly(self._on_zoom_changed))
         self.view = view
@@ -285,6 +338,9 @@ class BluepencilWindow(Adw.ApplicationWindow):
         self._set_document_actions(True)
         self._update_edit_actions()
         view.focus_pages()
+        if info.get("untitled"):
+            # Combined files: put the pages in order first.
+            self._actions["organize"].change_state(GLib.Variant.new_boolean(True))
         if info.get("repaired"):
             self._toast(_("This file is damaged. Bluepencil repaired it for viewing; the file itself is unchanged."))
 
@@ -384,6 +440,7 @@ class BluepencilWindow(Adw.ApplicationWindow):
         self._status.set_title(title)
         self._status.set_description(description)
         self._open_button.set_visible(show_button)
+        self._combine_button.set_visible(show_recent)
         self._recent_shown = show_recent
         self._refresh_recent_files()
         self._stack.set_visible_child(self._status)
@@ -542,6 +599,11 @@ class BluepencilWindow(Adw.ApplicationWindow):
             self._toast(_("Pages saved as “{name}”").format(name=name))
             self._update_edit_actions()
             return
+        if request["op"] == "split":
+            folder = GLib.path_get_basename(request["folder"])
+            self._toast(_("Split into {count} files in “{folder}”").format(count=len(reply["paths"]), folder=folder))
+            self._update_edit_actions()
+            return
         select = reply.get("select")
         current = self.view.current_page if self.view is not None else 0
         self._show_state(reply, select[0] if select else min(current, reply["page_count"] - 1))
@@ -599,6 +661,8 @@ class BluepencilWindow(Adw.ApplicationWindow):
             "undo": ready and bool(self._state.get("can_undo")),
             "redo": ready and bool(self._state.get("can_redo")),
             "save": ready and bool(self._state.get("modified")),
+            "combine": True,
+            "split": ready,
             "save-as": ready,
             "organize": self.current_file is not None,
             **dict.fromkeys(_PAGE_ACTIONS, ready),
@@ -609,7 +673,10 @@ class BluepencilWindow(Adw.ApplicationWindow):
     # Saving
 
     def _on_save(self, *_args: object) -> None:
-        self._send({"op": "save"})
+        if self._state.get("untitled"):
+            self._on_save_as()  # a new document needs a place first
+        else:
+            self._send({"op": "save"})
 
     def _on_save_as(self, *_args: object) -> None:
         if self.current_file is None:
@@ -624,6 +691,7 @@ class BluepencilWindow(Adw.ApplicationWindow):
         try:
             file = dialog.save_finish(result)
         except GLib.Error as error:
+            self._close_after_save = False  # no place chosen: stay open
             if not error.matches(Gtk.dialog_error_quark(), Gtk.DialogError.DISMISSED):
                 self._toast(_("Could not save the file: {reason}").format(reason=error.message))
             return
@@ -698,6 +766,7 @@ class BluepencilWindow(Adw.ApplicationWindow):
             self._actions[name] = action
 
         add("open", self._on_open_clicked)
+        add("combine", self._on_combine_clicked)
         add("zoom-in", self._view_action(DocumentView.zoom_in))
         add("zoom-out", self._view_action(DocumentView.zoom_out))
         add("zoom-fit-width", self._view_action(lambda view: view.fit(FitMode.WIDTH)))
@@ -715,6 +784,7 @@ class BluepencilWindow(Adw.ApplicationWindow):
         add("extract-pages", self._on_extract_pages)
         add("insert-blank", self._on_insert_blank)
         add("insert-files", self._on_insert_files)
+        add("split", self._on_split)
         organize = Gio.SimpleAction.new_stateful("organize", None, GLib.Variant.new_boolean(False))
         organize.connect("change-state", weakly(self._on_toggle_organize))
         self.add_action(organize)
@@ -801,6 +871,35 @@ class BluepencilWindow(Adw.ApplicationWindow):
             path += ".pdf"
         self._send({"op": "extract", "pages": pages, "path": path})
 
+    def _on_split(self, *_args: object) -> None:
+        if self.view is None:
+            return
+        dialog = SplitDialog(self.view.page_count)
+        dialog.connect("split-requested", weakly(self._on_split_requested))
+        dialog.present(self)
+
+    def _on_split_requested(self, _dialog: SplitDialog, groups: list[list[int]]) -> None:
+        chooser = Gtk.FileDialog(title=_("Choose a Folder for the New Files"), modal=True)
+        folder = self.current_file.get_parent() if self.current_file is not None else None
+        if folder is not None:
+            chooser.set_initial_folder(folder)
+        chooser.select_folder(self, None, weakly(self._on_split_folder_chosen), groups)
+
+    def _on_split_folder_chosen(self, dialog: Gtk.FileDialog, result: Gio.AsyncResult, groups: list) -> None:
+        try:
+            folder = dialog.select_folder_finish(result)
+        except GLib.Error:
+            return
+        if folder is not None and folder.get_path() is not None:
+            self.split_into(groups, folder.get_path())
+
+    def split_into(self, groups: list[list[int]], folder: str) -> None:
+        """Write each group of pages to its own new PDF in `folder`."""
+        if self.current_file is None:
+            return
+        stem = _display_name(self.current_file).removesuffix(".pdf")
+        self._send({"op": "split", "groups": groups, "folder": folder, "stem": stem})
+
     # Organize mode
 
     def _on_toggle_organize(self, action: Gio.SimpleAction, value: GLib.Variant) -> None:
@@ -874,8 +973,18 @@ class BluepencilWindow(Adw.ApplicationWindow):
         self._open_button = Gtk.Button(label=_("Open PDF…"), action_name="win.open", halign=Gtk.Align.CENTER)
         self._open_button.add_css_class("pill")
         self._open_button.add_css_class("suggested-action")
+        self._combine_button = Gtk.Button(
+            label=_("Combine Files…"),
+            action_name="win.combine",
+            halign=Gtk.Align.CENTER,
+            tooltip_text=_("Make one PDF from several PDFs and pictures"),
+        )
+        self._combine_button.add_css_class("pill")
+        buttons = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, halign=Gtk.Align.CENTER)
+        buttons.append(self._open_button)
+        buttons.append(self._combine_button)
         start = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=36)
-        start.append(self._open_button)
+        start.append(buttons)
         start.append(self._build_recent_files())
         return Adw.StatusPage(vexpand=True, child=Adw.Clamp(maximum_size=520, child=start))
 
@@ -917,6 +1026,7 @@ class BluepencilWindow(Adw.ApplicationWindow):
         page.append(_("Insert Blank Page"), "win.insert-blank")
         page.append(_("Insert Pages or Pictures…"), "win.insert-files")
         page.append(_("Extract…"), "win.extract-pages")
+        page.append(_("Split…"), "win.split")
         app = Gio.Menu()
         app.append(_("About {name}").format(name=APP_NAME), "app.about")
         app.append(_("Quit"), "app.quit")
@@ -948,6 +1058,13 @@ class BluepencilWindow(Adw.ApplicationWindow):
                 label=_("Extract…"),
                 action_name="win.extract-pages",
                 tooltip_text=_("Save the selected pages as a new PDF"),
+            )
+        )
+        tools.append(
+            Gtk.Button(
+                label=_("Split…"),
+                action_name="win.split",
+                tooltip_text=_("Cut the document into several new PDFs"),
             )
         )
         bar.pack_start(tools)

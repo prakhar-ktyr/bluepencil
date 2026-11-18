@@ -6,8 +6,9 @@ import gi
 import pymupdf
 
 gi.require_version("Gdk", "4.0")
+gi.require_version("Gio", "2.0")
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gdk, Gtk  # noqa: E402
+from gi.repository import Gdk, Gio, Gtk  # noqa: E402
 
 from .helpers import loaded  # noqa: E402
 from .test_editing import settled  # noqa: E402
@@ -234,3 +235,39 @@ def test_insert_blank_goes_after_the_selected_pages(run_app, make_pdf):
         assert window.organize.selected_pages() == [2]
 
     run_app((loaded, organize), (grid_shown, insert), (inserted, check), argv=[make_pdf(sizes=SIZES, pages=3)])
+
+
+def test_combine_files_makes_a_new_document_to_put_in_order_and_save(run_app, make_pdf, tmp_path):
+    first = make_pdf("first.pdf", pages=2, size=(300, 800))
+    second = make_pdf("second.pdf", pages=1, size=(400, 800))
+    joined = tmp_path / "joined.pdf"
+
+    def combine(window) -> None:
+        assert window._combine_button.get_visible()
+        window.combine_files([str(first), str(second)])
+
+    def combined(window) -> bool:
+        """the combined pages in the grid"""
+        return grid_shown(window) and len(window._page_sizes) == 3
+
+    def check_and_save(window) -> None:
+        assert widths(window) == [300, 300, 400]
+        assert window._title.get_subtitle() == "• Combined.pdf"
+        assert window.get_application().history.recent() == []  # not a file yet
+        assert not (tmp_path / "Combined.pdf").exists()
+        window.save_as(Gio.File.new_for_path(str(joined)))
+
+    def saved(window) -> bool:
+        """the new file"""
+        return grid_shown(window) and not window._state.get("modified")
+
+    def check_saved(window) -> None:
+        assert window._title.get_subtitle() == "joined.pdf"
+        assert window.get_application().history.recent()[0].path == str(joined)
+        assert [round(page.rect.width) for page in pymupdf.open(joined).pages()] == [300, 300, 400]
+
+    run_app(
+        (lambda window: True, combine),
+        (combined, check_and_save),
+        (saved, check_saved),
+    )

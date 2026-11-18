@@ -219,3 +219,38 @@ def test_without_its_snapshots_a_new_engine_starts_from_the_file(opened, tmp_pat
     resumed = Session.resume(opened.path, None, **history)
     assert fingerprint(resumed.document)[0][1] == 0
     assert not resumed.can_undo and not resumed.modified
+
+
+# Combining files into a new document
+
+
+def test_combine_makes_an_unsaved_document_from_several_files(make_pdf, picture, tmp_path):
+    first, second = make_pdf("first.pdf", pages=2), make_pdf("second.pdf", pages=1)
+    target = str(tmp_path / "Combined.pdf")
+    combined = Session.combine([str(first), picture, str(second)], target)
+    assert labels(combined.document) == ["Page 1", "Page 2", "blank", "Page 1"]
+    assert combined.untitled and combined.modified and not combined.can_undo
+    assert not Path(target).exists()
+
+    combined.edit(lambda document: pages.delete(document, [2]))
+    combined.undo()
+    assert not combined.can_undo  # the combined document is where undo stops
+
+    combined.save(target)
+    assert not combined.untitled and not combined.modified
+    assert labels(pymupdf.open(target)) == ["Page 1", "Page 2", "blank", "Page 1"]
+    combined.close()
+
+
+def test_combine_refuses_files_it_cannot_use(tmp_path):
+    (tmp_path / "notes.txt").write_text("hello")
+    with pytest.raises(PageError):
+        Session.combine([str(tmp_path / "notes.txt")], str(tmp_path / "Combined.pdf"))
+
+
+def test_a_combined_document_survives_an_engine_crash(make_pdf, tmp_path):
+    combined = Session.combine([str(make_pdf(pages=3))], str(tmp_path / "Combined.pdf"))
+    history = combined.state()["history"]
+    resumed = Session.resume(combined.path, None, **history)
+    assert resumed.untitled and resumed.modified
+    assert resumed.document.page_count == 3

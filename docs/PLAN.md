@@ -6,15 +6,16 @@ This is the working plan for the project: what the app is, every feature it
 will have, how it is built, and the order of work. Tick the checkboxes as work
 lands, and change the plan when reality disagrees with it.
 
-**Where things stand:** Milestone 0 (foundations) is nearly done and
-Milestone 1 (viewer) is built: PDFs open and display with zoom, page
-navigation, password prompts and clear errors, and the PDF engine runs in its
-own process and recovers from crashes; a thumbnail sidebar shows every page;
-the start page lists recent files, and each file reopens at the page and zoom
-it was left at. `./dev bench` measures the budgets, and all of them pass on
-the hidden display. Left in Milestone 1: checks on a real desktop.
-**Next action:** Milestone 2, organize pages, starting with the page
-operations in the engine. Alongside it: reserve the Snap Store name.
+**Where things stand:** Milestones 1 (viewer) and 2 (organize pages) are
+built, with 154 tests. Bluepencil opens, shows and remembers PDFs; rotates,
+deletes, duplicates, moves, inserts, extracts and splits pages, alone or many
+at once in Organize mode; combines files; undoes and redoes every change;
+saves safely; and keeps unsaved changes through an engine crash. Left in
+these milestones: checks by hand on a real desktop (scrolling, memory,
+dragging pages, files opened in other apps after saving) and a recovery copy
+after the whole app stops.
+**Next action:** try it by hand (`./dev`), then Milestone 3, Compress.
+Alongside it: reserve the Snap Store name.
 
 ## Contents
 
@@ -568,16 +569,18 @@ Interface
       deletes them, Ctrl+[ and Ctrl+] rotate them
 - [x] Drop PDF or image files onto the grid to insert them at that position,
       as one step that undo takes back
-- [ ] "Combine files" on the start page: pick files, order them, get one document
-- [ ] Split dialog
+- [x] "Combine files" on the start page: pick PDFs and pictures, put the pages
+      in order in the grid, then Save asks where the new document goes
+- [x] Split dialog: every N pages, or ranges typed as "1-3, 4-10, 11-",
+      checked as they are typed; the parts go to a chosen folder
 - [x] Unsaved-changes marker, and Save / Discard / Cancel on close (also on
       Quit); Save, Save As, Undo, Redo, and rotate or delete the current page
       from the menu and shortcuts; a failed save offers Save As
 
 Tests
 
-- [ ] Every operation, then undo and redo back to an identical document
-- [ ] Save round trip; merged files keep their bookmarks and links
+- [x] Every operation, then undo and redo back to an identical document
+- [x] Save round trip; merged files keep their bookmarks and links
 - [ ] Manual check: saved files open correctly in Document Viewer and Firefox
 
 **Done when:** reorder, rotate, delete, merge and split all work with undo, and

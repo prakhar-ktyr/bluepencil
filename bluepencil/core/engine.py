@@ -61,12 +61,11 @@ class Engine:
         }
 
     def handle(self, request: dict) -> tuple[dict, bytes]:
-        op = request.get("op")
-        if op == "open":
-            return self._open(request)
-        if op == "ping":
-            return {"ok": True}, b""
-        handler = self._handlers.get(str(op))
+        op = str(request.get("op"))
+        starts = {"open": self._open, "combine": self._combine, "ping": lambda _request: ({"ok": True}, b"")}
+        if op in starts:
+            return starts[op](request)
+        handler = self._handlers.get(op)
         if handler is None:
             return {"ok": False, "error": "unknown-request", "detail": str(op)}, b""
         if self.session is None:
@@ -112,6 +111,15 @@ class Engine:
             self.session.close()
             self.session = None
 
+    def _combine(self, request: dict) -> tuple[dict, bytes]:
+        """Make a new document from several files."""
+        self.close()
+        try:
+            self.session = Session.combine(request["paths"], request["path"])
+        except (OpenError, PageError) as error:
+            return _failure(error)
+        return {"ok": True, **self.session.state()}, b""
+
     def _open(self, request: dict) -> tuple[dict, bytes]:
         """Open a file, or carry on from the snapshots of an engine that stopped."""
         self.close()
@@ -125,6 +133,7 @@ class Engine:
                     files=history["files"],
                     position=history["position"],
                     saved_position=history["saved_position"],
+                    untitled=history.get("untitled", False),
                 )
             else:
                 self.session = Session(path, password)

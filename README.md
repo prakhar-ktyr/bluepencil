@@ -8,8 +8,9 @@ convert PDFs in one window, with every file staying on your computer.
 **Status: early development.** Bluepencil opens PDFs, including
 password-protected ones, and shows their pages with zoom, page navigation and
 a thumbnail sidebar. It lists recent files and reopens each one where you
-left it.
-Editing features come next.
+left it. In Organize mode (Ctrl+G) it rotates, deletes, duplicates, moves,
+inserts, extracts and splits pages, and it combines several PDFs and pictures
+into one. Every change can be undone, and nothing is written until you save.
 
 ## Run from source
 

@@ -21,6 +21,7 @@ from pathlib import Path
 
 import pymupdf
 
+from . import pages
 from .document import KEEP_ENCRYPTION, describe, open_document
 
 #: Steps that can be undone, and the disk space their snapshots may take;
@@ -68,10 +69,41 @@ class Session:
         self.position = -1
         #: The snapshot that matches the file on disk.
         self.saved_position = -1
+        #: A new document that has never been saved: Save needs a place first.
+        self.untitled = False
+
+    @classmethod
+    def combine(cls, paths: list[str], target: str) -> "Session":
+        """A new document made of these PDFs and pictures, in this order.
+
+        It has no file yet; `target` is only the suggested place to save it.
+        """
+        document = pymupdf.open()
+        try:
+            pages.insert_files(document, paths, 0)
+        except Exception:
+            document.close()
+            raise
+        session = cls.__new__(cls)
+        session.path, session.password, session.document = target, None, document
+        session.folder, session.snapshots, session.position, session.saved_position = None, [], -1, -1
+        session.untitled = True
+        # The first snapshot holds the new document, so that undo stops there
+        # and a crash loses nothing; it is not on disk, so it counts as unsaved.
+        session._snapshot()
+        return session
 
     @classmethod
     def resume(
-        cls, path: str, password: str | None, *, folder: str, files: list[str], position: int, saved_position: int
+        cls,
+        path: str,
+        password: str | None,
+        *,
+        folder: str,
+        files: list[str],
+        position: int,
+        saved_position: int,
+        untitled: bool = False,
     ) -> "Session":
         """Carry on from the snapshots of an engine process that stopped."""
         snapshots = [Path(file) for file in files]
@@ -81,6 +113,7 @@ class Session:
         session = cls.__new__(cls)
         session.path = path
         session.password = password
+        session.untitled = untitled
         if usable:
             session.document = open_document(str(snapshots[position]), password)
             session.folder, session.snapshots = Path(folder), snapshots
@@ -165,6 +198,7 @@ class Session:
             temporary.unlink(missing_ok=True)
         self.path = str(destination)
         self.saved_position = self.position
+        self.untitled = False
 
     def _check(self, path: Path) -> None:
         """Reopen a written file to make sure it is complete."""
@@ -187,6 +221,7 @@ class Session:
             "can_undo": self.can_undo,
             "can_redo": self.can_redo,
             "modified": self.modified,
+            "untitled": self.untitled,
             "history": None
             if self.folder is None
             else {
@@ -194,6 +229,7 @@ class Session:
                 "files": [str(snapshot) for snapshot in self.snapshots],
                 "position": self.position,
                 "saved_position": self.saved_position,
+                "untitled": self.untitled,
             },
         }
 

@@ -5,7 +5,7 @@
 import pymupdf
 import pytest
 
-from bluepencil.core import pages
+from bluepencil.core import pages, ranges
 from bluepencil.core.document import OpenError, open_document
 from bluepencil.core.pages import PageError
 
@@ -227,7 +227,7 @@ def test_extract_keeps_the_password(make_pdf, tmp_path):
 
 def test_split_writes_numbered_files_without_replacing_any(document, tmp_path):
     (tmp_path / "report, part 1.pdf").write_bytes(b"someone else's file")
-    written = pages.split(document, pages.every(2, 5), str(tmp_path), "report")
+    written = pages.split(document, ranges.every(2, 5), str(tmp_path), "report")
     assert [p.rsplit("/", 1)[1] for p in written] == [
         "report, part 1 (2).pdf",
         "report, part 2.pdf",
@@ -247,19 +247,19 @@ def test_split_writes_numbered_files_without_replacing_any(document, tmp_path):
     ],
 )
 def test_page_ranges_as_people_type_them(text, groups):
-    assert pages.parse_ranges(text, 10) == groups
+    assert ranges.parse_ranges(text, 10) == groups
 
 
 @pytest.mark.parametrize("text", ["", "0", "3-2", "11", "1-11", "a", "1,,x"])
 def test_wrong_page_ranges_are_refused(text):
     with pytest.raises(ValueError):
-        pages.parse_ranges(text, 10)
+        ranges.parse_ranges(text, 10)
 
 
 def test_every_n_pages():
-    assert pages.every(4, 10) == [[0, 1, 2, 3], [4, 5, 6, 7], [8, 9]]
+    assert ranges.every(4, 10) == [[0, 1, 2, 3], [4, 5, 6, 7], [8, 9]]
     with pytest.raises(ValueError):
-        pages.every(0, 10)
+        ranges.every(0, 10)
 
 
 def test_insert_files_takes_pdfs_and_pictures_in_order(document, make_pdf, tmp_path):
