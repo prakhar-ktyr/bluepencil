@@ -36,6 +36,7 @@ EDITS: dict[str, Callable[[pymupdf.Document, dict], list[int]]] = {
         document, request["path"], request["at"], request.get("password")
     ),
     "insert-image": lambda document, request: pages.insert_image(document, request["path"], request["at"]),
+    "insert-files": lambda document, request: pages.insert_files(document, request["paths"], request["at"]),
 }
 
 

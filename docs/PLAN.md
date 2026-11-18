@@ -560,10 +560,14 @@ Engine
 
 Interface
 
-- [ ] Organize mode: page grid, multi-select, drag-and-drop reordering
-- [ ] Toolbar buttons and keyboard shortcuts for every page operation, so that
-      nothing depends on dragging
-- [ ] Drop PDF or image files onto the grid to insert them at that position
+- [x] Organize mode (Ctrl+G): page grid, multi-select, drag-and-drop
+      reordering; a double click goes back to reading at that page
+      (dragging not yet tried by hand: the tests call the drop handler)
+- [x] Toolbar buttons and keyboard shortcuts for every page operation, so that
+      nothing depends on dragging: Alt and the arrow keys move pages, Delete
+      deletes them, Ctrl+[ and Ctrl+] rotate them
+- [x] Drop PDF or image files onto the grid to insert them at that position,
+      as one step that undo takes back
 - [ ] "Combine files" on the start page: pick files, order them, get one document
 - [ ] Split dialog
 - [x] Unsaved-changes marker, and Save / Discard / Cancel on close (also on

@@ -260,3 +260,21 @@ def test_every_n_pages():
     assert pages.every(4, 10) == [[0, 1, 2, 3], [4, 5, 6, 7], [8, 9]]
     with pytest.raises(ValueError):
         pages.every(0, 10)
+
+
+def test_insert_files_takes_pdfs_and_pictures_in_order(document, make_pdf, tmp_path):
+    picture = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 200, 100), False)
+    picture.clear_with(200)
+    picture.save(str(tmp_path / "picture.png"))
+    other = make_pdf("other.pdf", pages=2)
+    selected = pages.insert_files(document, [str(tmp_path / "picture.png"), str(other)], 1)
+    assert selected == [1, 2, 3]
+    assert labels(document) == ["Page 1", "blank", "Page 1", "Page 2", "Page 2", "Page 3", "Page 4", "Page 5"]
+    assert document[1].get_images()
+
+
+def test_insert_files_refuses_files_that_are_neither(document, tmp_path):
+    (tmp_path / "notes.txt").write_text("hello")
+    with pytest.raises(PageError) as error:
+        pages.insert_files(document, [str(tmp_path / "notes.txt")], 0)
+    assert error.value.code == pages.UNSUPPORTED_FILE

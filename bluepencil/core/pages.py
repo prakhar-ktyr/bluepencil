@@ -33,6 +33,7 @@ NO_PAGES_LEFT = "no-pages-left"
 BAD_PAGES = "bad-pages"
 BAD_ANGLE = "bad-angle"
 NOT_AN_IMAGE = "not-an-image"
+UNSUPPORTED_FILE = "unsupported-file"
 
 
 def _checked(document: pymupdf.Document, pages: Sequence[int]) -> list[int]:
@@ -136,6 +137,25 @@ def insert_image(document: pymupdf.Document, path: str, at: int) -> list[int]:
     # From the file itself, so a JPEG is stored as it is, without recompressing.
     page.insert_image(page.rect, filename=path)
     return [at]
+
+
+def insert_files(document: pymupdf.Document, paths: Sequence[str], at: int) -> list[int]:
+    """Insert PDFs and pictures, in this order, before page `at`."""
+    position = _insertion_point(document, at)
+    inserted: list[int] = []
+    for path in paths:
+        try:
+            added = insert_pdf(document, path, position)
+        except OpenError as error:
+            if error.code not in ("not-pdf", "damaged"):
+                raise
+            try:
+                added = insert_image(document, path, position)
+            except PageError:
+                raise PageError(UNSUPPORTED_FILE, Path(path).name) from error
+        inserted.extend(added)
+        position += len(added)
+    return inserted
 
 
 def subset(document: pymupdf.Document, pages: Sequence[int], password: str | None = None) -> pymupdf.Document:

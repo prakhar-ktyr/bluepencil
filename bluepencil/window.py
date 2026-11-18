@@ -21,6 +21,7 @@ from .engine_client import EngineClient  # noqa: E402
 from .history import History  # noqa: E402
 from .i18n import _  # noqa: E402
 from .ui.document_view import DocumentView, FitMode  # noqa: E402
+from .ui.organize import OrganizeView  # noqa: E402
 from .ui.thumbnails import ThumbnailSidebar  # noqa: E402
 from .ui.weak import weakly  # noqa: E402
 
@@ -39,8 +40,17 @@ RECENT_SHOWN = 10
 OPEN_PRIORITY = -2
 EDIT_PRIORITY = -1
 
-#: Actions that change the document, or save it.
-_EDIT_ACTIONS = ("undo", "redo", "save", "save-as", "rotate-left", "rotate-right", "delete-page")
+#: Actions that change pages: in Organize mode they act on the selected
+#: pages, otherwise on the current page.
+_PAGE_ACTIONS = (
+    "rotate-left",
+    "rotate-right",
+    "delete-page",
+    "duplicate-pages",
+    "extract-pages",
+    "insert-blank",
+    "insert-files",
+)
 
 _DOCUMENT_ACTIONS = (
     "zoom-in",
@@ -72,6 +82,9 @@ def _edit_error_message(code: str | None) -> str:
         "read-only": _("This location is read-only. Use Save As to save a copy elsewhere."),
         "disk-full": _("The disk is full. Free some space, or save the file somewhere else."),
         "check-failed": _("The saved file could not be read back, so the original was kept as it was."),
+        "unsupported-file": _("Only PDFs and pictures can be added to a document."),
+        "needs-password": _("One of the files is password-protected. Open it first, and extract its pages."),
+        "damaged": _("One of the files is damaged."),
         "write-failed": _("The file could not be written. The original was kept as it was."),
     }
     return messages.get(code or "", _("That did not work, and nothing was changed."))
@@ -121,6 +134,8 @@ class BluepencilWindow(Adw.ApplicationWindow):
         self._busy = False
         self._close_after_save = False
         self._discard_confirmed = False
+        #: The page grid, while Organize mode is on.
+        self.organize: OrganizeView | None = None
         self._actions: dict[str, Gio.SimpleAction] = {}
         #: Rows of the recent files list, with the path each one opens.
         self._recent_rows: list[tuple[str, Adw.ActionRow]] = []
@@ -146,6 +161,9 @@ class BluepencilWindow(Adw.ApplicationWindow):
         self._toolbar.add_top_bar(header)
         self._bottom_bar = self._build_bottom_bar()
         self._toolbar.add_bottom_bar(self._bottom_bar)
+        self._organize_bar = self._build_organize_bar()
+        self._organize_bar.set_visible(False)
+        self._toolbar.add_bottom_bar(self._organize_bar)
         self.set_content(self._toolbar)
         self._show_start()
 
@@ -333,6 +351,9 @@ class BluepencilWindow(Adw.ApplicationWindow):
 
     def _close_document(self) -> None:
         self._remember_position()
+        if self._organize_on:
+            self._actions["organize"].change_state(GLib.Variant.new_boolean(False))
+        self._drop_organize()
         self._split.set_content(None)
         self._split.set_sidebar(None)
         self.view = None
@@ -486,10 +507,19 @@ class BluepencilWindow(Adw.ApplicationWindow):
         self._engine.request(request, on_reply, priority=EDIT_PRIORITY)
 
     def _edit_pages(self, action: str, **arguments: object) -> None:
+        if arguments.get("pages") == []:
+            return  # nothing selected
         self._send({"op": "edit", "action": action, **arguments})
 
     def _current_pages(self) -> list[int]:
+        """The pages a page action acts on."""
+        if self.organize is not None and self._organize_on:
+            return self.organize.selected_pages()
         return [self.view.current_page] if self.view is not None else []
+
+    @property
+    def _organize_on(self) -> bool:
+        return bool(self._actions["organize"].get_state().get_boolean())
 
     def _on_changed(self, file: Gio.File, request: dict, reply: dict, _payload: bytes) -> None:
         if file is not self.current_file:
@@ -506,6 +536,11 @@ class BluepencilWindow(Adw.ApplicationWindow):
             return
         if request["op"] == "save":
             self._on_saved(request, reply)
+            return
+        if request["op"] == "extract":
+            name = GLib.path_get_basename(request["path"])
+            self._toast(_("Pages saved as “{name}”").format(name=name))
+            self._update_edit_actions()
             return
         select = reply.get("select")
         current = self.view.current_page if self.view is not None else 0
@@ -531,12 +566,20 @@ class BluepencilWindow(Adw.ApplicationWindow):
             self.sidebar = None
             if self._split.get_show_sidebar():
                 self._build_sidebar()
+        if self.organize is not None:
+            previous = self.organize.selected_pages()
+            self._drop_organize()
+            count = state["page_count"]
+            selected = state.get("select") or [index for index in previous if index < count] or [page]
+            self._build_organize(selected)
+            self._set_organize(self._organize_on)
         self._page_total.set_label(_("of {count}").format(count=state["page_count"]))
         self._page_entry.set_text(str(view.current_page + 1))
         self._on_zoom_changed(view)
         self._update_title()
         self._update_edit_actions()
-        view.focus_pages()
+        if not self._organize_on:
+            view.focus_pages()
 
     def _update_title(self) -> None:
         if self.current_file is None:
@@ -557,9 +600,8 @@ class BluepencilWindow(Adw.ApplicationWindow):
             "redo": ready and bool(self._state.get("can_redo")),
             "save": ready and bool(self._state.get("modified")),
             "save-as": ready,
-            "rotate-left": ready,
-            "rotate-right": ready,
-            "delete-page": ready,
+            "organize": self.current_file is not None,
+            **dict.fromkeys(_PAGE_ACTIONS, ready),
         }
         for name, value in enabled.items():
             self._actions[name].set_enabled(value)
@@ -669,6 +711,14 @@ class BluepencilWindow(Adw.ApplicationWindow):
         add("rotate-left", self._on_rotate_left)
         add("rotate-right", self._on_rotate_right)
         add("delete-page", self._on_delete_page)
+        add("duplicate-pages", self._on_duplicate_pages)
+        add("extract-pages", self._on_extract_pages)
+        add("insert-blank", self._on_insert_blank)
+        add("insert-files", self._on_insert_files)
+        organize = Gio.SimpleAction.new_stateful("organize", None, GLib.Variant.new_boolean(False))
+        organize.connect("change-state", weakly(self._on_toggle_organize))
+        self.add_action(organize)
+        self._actions["organize"] = organize
         sidebar = Gio.SimpleAction.new_stateful("toggle-sidebar", None, GLib.Variant.new_boolean(False))
         sidebar.connect("change-state", weakly(self._on_toggle_sidebar))
         self.add_action(sidebar)
@@ -690,6 +740,119 @@ class BluepencilWindow(Adw.ApplicationWindow):
 
     def _on_delete_page(self, *_args: object) -> None:
         self._edit_pages("delete", pages=self._current_pages())
+
+    def _on_duplicate_pages(self, *_args: object) -> None:
+        self._edit_pages("duplicate", pages=self._current_pages())
+
+    def _on_insert_blank(self, *_args: object) -> None:
+        pages = self._current_pages()
+        if pages:
+            self._edit_pages("insert-blank", at=pages[-1] + 1)
+
+    def _on_insert_files(self, *_args: object) -> None:
+        pages = self._current_pages()
+        if not pages:
+            return
+        accepted = Gtk.FileFilter(name=_("PDFs and pictures"))
+        accepted.add_mime_type("application/pdf")
+        accepted.add_pixbuf_formats()
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(accepted)
+        dialog = Gtk.FileDialog(title=_("Insert Pages or Pictures"), modal=True, filters=filters)
+        dialog.open_multiple(self, None, weakly(self._on_insert_files_chosen), pages[-1] + 1)
+
+    def _on_insert_files_chosen(self, dialog: Gtk.FileDialog, result: Gio.AsyncResult, at: int) -> None:
+        try:
+            files = dialog.open_multiple_finish(result)
+        except GLib.Error:
+            return  # closed without choosing
+        paths = [file.get_path() for file in files if file.get_path() is not None]
+        if paths:
+            self.insert_files(paths, at)
+
+    def insert_files(self, paths: list[str], at: int) -> None:
+        """Insert PDFs and pictures before page `at`, as one step."""
+        self._send({"op": "edit", "action": "insert-files", "paths": paths, "at": at})
+
+    def _on_extract_pages(self, *_args: object) -> None:
+        pages = self._current_pages()
+        if not pages or self.current_file is None:
+            return
+        stem = _display_name(self.current_file).removesuffix(".pdf")
+        span = str(pages[0] + 1) if len(pages) == 1 else f"{pages[0] + 1}-{pages[-1] + 1}"
+        name = _("{name}, pages {span}.pdf").format(name=stem, span=span)
+        dialog = Gtk.FileDialog(title=_("Extract Pages"), modal=True, initial_name=name)
+        folder = self.current_file.get_parent()
+        if folder is not None:
+            dialog.set_initial_folder(folder)
+        dialog.save(self, None, weakly(self._on_extract_chosen), pages)
+
+    def _on_extract_chosen(self, dialog: Gtk.FileDialog, result: Gio.AsyncResult, pages: list[int]) -> None:
+        try:
+            file = dialog.save_finish(result)
+        except GLib.Error:
+            return
+        if file is not None and file.get_path() is not None:
+            self.extract_pages(pages, file.get_path())
+
+    def extract_pages(self, pages: list[int], path: str) -> None:
+        """Write these pages to a new PDF at `path`; the document is unchanged."""
+        if not path.lower().endswith(".pdf"):
+            path += ".pdf"
+        self._send({"op": "extract", "pages": pages, "path": path})
+
+    # Organize mode
+
+    def _on_toggle_organize(self, action: Gio.SimpleAction, value: GLib.Variant) -> None:
+        action.set_state(value)
+        self._set_organize(value.get_boolean())
+
+    def _set_organize(self, on: bool) -> None:
+        if on and self.view is not None and self.organize is None:
+            self._build_organize(self._current_pages())
+        organize = self.organize
+        if organize is None:
+            return
+        organize.set_open(on)
+        self._bottom_bar.set_visible(not on)
+        self._organize_bar.set_visible(on)
+        if on:
+            self._stack.set_visible_child(organize)
+            organize.reveal_selected()
+            organize.focus_grid()
+        else:
+            self._stack.set_visible_child(self._split)
+            pages = organize.selected_pages()
+            if pages and self.view is not None:
+                self.view.go_to_page(pages[0])
+                self.view.focus_pages()
+
+    def _build_organize(self, selected: list[int]) -> None:
+        engine = self._ensure_engine()
+        organize = OrganizeView(engine, self._page_sizes)
+        organize.connect("edit-requested", weakly(self._on_organize_edit))
+        organize.connect("insert-requested", weakly(self._on_organize_insert))
+        organize.connect("page-chosen", weakly(self._on_organize_page_chosen))
+        organize.select_pages(selected)
+        self.organize = organize
+        self._stack.add_child(organize)
+
+    def _drop_organize(self) -> None:
+        if self.organize is not None:
+            self._stack.remove(self.organize)
+            self.organize = None
+
+    def _on_organize_edit(self, _organize: OrganizeView, request: dict) -> None:
+        self._send({"op": "edit", **request})
+
+    def _on_organize_insert(self, _organize: OrganizeView, paths: list[str], at: int) -> None:
+        self.insert_files(paths, at)
+
+    def _on_organize_page_chosen(self, _organize: OrganizeView, index: int, activated: bool) -> None:
+        if activated:  # Enter or a double click: read from that page
+            self._actions["organize"].change_state(GLib.Variant.new_boolean(False))
+            if self.view is not None:
+                self.view.go_to_page(index)
 
     def _view_action(self, method: Callable[[DocumentView], object]) -> Callable[..., None]:
         """An action handler that calls `method` on the page view, if any."""
@@ -725,6 +888,13 @@ class BluepencilWindow(Adw.ApplicationWindow):
                 tooltip_text=_("Page Thumbnails (F9)"),
             )
         )
+        header.pack_start(
+            Gtk.ToggleButton(
+                icon_name="view-grid-symbolic",
+                action_name="win.organize",
+                tooltip_text=_("Organize Pages (Ctrl+G)"),
+            )
+        )
         header.pack_start(Gtk.Button(label=_("Open"), action_name="win.open", tooltip_text=_("Open a PDF")))
         header.pack_end(self._build_menu_button())
         self._save_button = Gtk.Button(label=_("Save"), action_name="win.save", tooltip_text=_("Save (Ctrl+S)"))
@@ -739,16 +909,55 @@ class BluepencilWindow(Adw.ApplicationWindow):
         edits.append(_("Undo"), "win.undo")
         edits.append(_("Redo"), "win.redo")
         page = Gio.Menu()
-        page.append(_("Rotate Page Left"), "win.rotate-left")
-        page.append(_("Rotate Page Right"), "win.rotate-right")
-        page.append(_("Delete Page"), "win.delete-page")
+        page.append(_("Organize Pages"), "win.organize")
+        page.append(_("Rotate Left"), "win.rotate-left")
+        page.append(_("Rotate Right"), "win.rotate-right")
+        page.append(_("Duplicate"), "win.duplicate-pages")
+        page.append(_("Delete"), "win.delete-page")
+        page.append(_("Insert Blank Page"), "win.insert-blank")
+        page.append(_("Insert Pages or Pictures…"), "win.insert-files")
+        page.append(_("Extract…"), "win.extract-pages")
         app = Gio.Menu()
         app.append(_("About {name}").format(name=APP_NAME), "app.about")
         app.append(_("Quit"), "app.quit")
         menu = Gio.Menu()
-        for section in (files, edits, page, app):
-            menu.append_section(None, section)
+        menu.append_section(None, files)
+        menu.append_section(None, edits)
+        menu.append_section(_("Pages"), page)
+        menu.append_section(None, app)
         return Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu, tooltip_text=_("Main Menu"))
+
+    def _build_organize_bar(self) -> Gtk.ActionBar:
+        """Tools for the selected pages in Organize mode."""
+        bar = Gtk.ActionBar()
+
+        def button(icon: str, action: str, tooltip: str) -> Gtk.Button:
+            return Gtk.Button(icon_name=icon, action_name=f"win.{action}", tooltip_text=tooltip)
+
+        tools = Gtk.Box(spacing=6)
+        tools.append(button("object-rotate-left-symbolic", "rotate-left", _("Rotate Left (Ctrl+[)")))
+        tools.append(button("object-rotate-right-symbolic", "rotate-right", _("Rotate Right (Ctrl+])")))
+        tools.append(button("edit-copy-symbolic", "duplicate-pages", _("Duplicate")))
+        tools.append(button("user-trash-symbolic", "delete-page", _("Delete (Delete)")))
+        insert = Gio.Menu()
+        insert.append(_("Blank Page"), "win.insert-blank")
+        insert.append(_("Pages or Pictures From Files…"), "win.insert-files")
+        tools.append(Gtk.MenuButton(icon_name="list-add-symbolic", menu_model=insert, tooltip_text=_("Insert")))
+        tools.append(
+            Gtk.Button(
+                label=_("Extract…"),
+                action_name="win.extract-pages",
+                tooltip_text=_("Save the selected pages as a new PDF"),
+            )
+        )
+        bar.pack_start(tools)
+
+        history = Gtk.Box()
+        history.add_css_class("linked")
+        history.append(button("edit-undo-symbolic", "undo", _("Undo (Ctrl+Z)")))
+        history.append(button("edit-redo-symbolic", "redo", _("Redo (Ctrl+Shift+Z)")))
+        bar.pack_end(history)
+        return bar
 
     def _build_bottom_bar(self) -> Gtk.ActionBar:
         bar = Gtk.ActionBar()

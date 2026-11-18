@@ -38,8 +38,10 @@ LOOKAHEAD = 0.5
 SETTLE_MS = 150
 
 
-def thumbnail_size(width_pt: float, height_pt: float) -> tuple[int, int]:
-    scale = min(THUMBNAIL_WIDTH / width_pt, THUMBNAIL_MAX_HEIGHT / height_pt)
+def thumbnail_size(
+    width_pt: float, height_pt: float, width: int = THUMBNAIL_WIDTH, max_height: int = THUMBNAIL_MAX_HEIGHT
+) -> tuple[int, int]:
+    scale = min(width / width_pt, max_height / height_pt)
     return max(1, round(width_pt * scale)), max(1, round(height_pt * scale))
 
 
@@ -62,9 +64,9 @@ class ThumbnailSheet(Gtk.Widget):
 
     __gtype_name__ = "BluepencilThumbnailSheet"
 
-    def __init__(self) -> None:
-        super().__init__(halign=Gtk.Align.CENTER)
-        self.size = (THUMBNAIL_WIDTH, THUMBNAIL_WIDTH)
+    def __init__(self, width: int = THUMBNAIL_WIDTH) -> None:
+        super().__init__(halign=Gtk.Align.CENTER, valign=Gtk.Align.END)
+        self.size = (width, width)
         self.texture: Gdk.Texture | None = None
         self.add_css_class("bp-page")
 
@@ -90,9 +92,10 @@ class ThumbnailRow(Gtk.Box):
 
     __gtype_name__ = "BluepencilThumbnailRow"
 
-    def __init__(self) -> None:
+    def __init__(self, width: int = THUMBNAIL_WIDTH, max_height: int = THUMBNAIL_MAX_HEIGHT) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=6, margin_bottom=6)
-        self.sheet = ThumbnailSheet()
+        self.width, self.max_height = width, max_height
+        self.sheet = ThumbnailSheet(width)
         self.label = Gtk.Label(halign=Gtk.Align.CENTER)
         self.label.add_css_class("caption")
         self.append(self.sheet)
@@ -117,14 +120,23 @@ class ThumbnailRow(Gtk.Box):
         self.sheet.show(self.sheet.size, None)
 
     def _on_texture(self, item: PageItem, *_args: object) -> None:
-        self.sheet.show(thumbnail_size(item.width_pt, item.height_pt), item.props.texture)
+        size = thumbnail_size(item.width_pt, item.height_pt, self.width, self.max_height)
+        self.sheet.show(size, item.props.texture)
 
 
 class ThumbnailSidebar(Gtk.Box):
-    """Thumbnails of every page. Emits page-chosen when the user picks one."""
+    """Thumbnails of every page. Emits page-chosen when the user picks one.
+
+    The organize grid (organize.py) is the same with bigger tiles, in a grid,
+    and with several pages selected at once.
+    """
+
+    #: Largest tile, in logical pixels.
+    tile_width = THUMBNAIL_WIDTH
+    tile_max_height = THUMBNAIL_MAX_HEIGHT
 
     __gtype_name__ = "BluepencilThumbnailSidebar"
-    __gsignals__ = {
+    __gsignals__: dict[str, tuple] = {
         # (page index, activated): activated is True for Enter or a double click.
         "page-chosen": (GObject.SignalFlags.RUN_LAST, None, (int, bool)),
     }
@@ -147,17 +159,16 @@ class ThumbnailSidebar(Gtk.Box):
 
         store = Gio.ListStore.new(PageItem)
         store.splice(0, 0, self.items)
-        self._selection = Gtk.SingleSelection(model=store, autoselect=True, can_unselect=False)
+        self._selection = self._make_selection(store)
         # Handlers on things this sidebar owns are connected weakly (see weak.py).
-        self._selection.connect("notify::selected", weakly(self._on_selected))
+        if self._selection.find_property("selected") is not None:
+            self._selection.connect("notify::selected", weakly(self._on_selected))
 
         factory = Gtk.SignalListItemFactory()
         factory.connect("setup", weakly(self._on_setup))
         factory.connect("bind", weakly(self._on_bind))
         factory.connect("unbind", weakly(self._on_unbind))
-        self._list = Gtk.ListView(model=self._selection, factory=factory, vexpand=True)
-        self._list.add_css_class("navigation-sidebar")
-        self._list.update_property([Gtk.AccessibleProperty.LABEL], [_("Page thumbnails")])
+        self._list = self._make_view(self._selection, factory)
         self._list.connect("activate", weakly(self._on_activate))
         self._scroller = Gtk.ScrolledWindow(child=self._list, hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
         self.append(self._scroller)
@@ -166,6 +177,15 @@ class ThumbnailSidebar(Gtk.Box):
         adjustment.connect("value-changed", weakly(self._on_scrolled))
         adjustment.connect("changed", weakly(self._on_scrolled))
         self.connect("map", self._on_scrolled)
+
+    def _make_selection(self, store: Gio.ListStore) -> Gtk.SelectionModel:
+        return Gtk.SingleSelection(model=store, autoselect=True, can_unselect=False)
+
+    def _make_view(self, selection: Gtk.SelectionModel, factory: Gtk.ListItemFactory) -> Gtk.Widget:
+        view = Gtk.ListView(model=selection, factory=factory, vexpand=True)
+        view.add_css_class("navigation-sidebar")
+        view.update_property([Gtk.AccessibleProperty.LABEL], [_("Page thumbnails")])
+        return view
 
     @property
     def selected(self) -> int:
@@ -202,7 +222,7 @@ class ThumbnailSidebar(Gtk.Box):
     # The list
 
     def _on_setup(self, _factory: Gtk.SignalListItemFactory, list_item: Gtk.ListItem) -> None:
-        list_item.set_child(ThumbnailRow())
+        list_item.set_child(ThumbnailRow(self.tile_width, self.tile_max_height))
 
     def _on_bind(self, _factory: Gtk.SignalListItemFactory, list_item: Gtk.ListItem) -> None:
         item = list_item.get_item()
@@ -266,19 +286,23 @@ class ThumbnailSidebar(Gtk.Box):
         if item.index in self._requested:
             return
         self._requested.add(item.index)
-        width, _height = thumbnail_size(item.width_pt, item.height_pt)
+        width, _height = thumbnail_size(item.width_pt, item.height_pt, self.tile_width, self.tile_max_height)
         scale = width / item.width_pt * device_scale(self)
         self._engine.request(
             {"op": "render", "page": item.index, "scale": scale},
             functools.partial(self._on_rendered, item),
             priority=THUMBNAIL_PRIORITY,
-            key=("thumbnail", item.index),
+            key=self._key(item.index),
         )
+
+    def _key(self, index: int) -> tuple:
+        # Per list: the sidebar and the organize grid can both be waiting.
+        return ("thumbnail", id(self), index)
 
     def _cancel(self, index: int) -> None:
         if index in self._requested:
             # Scrolled past before its turn came: no need to render it.
-            self._engine.cancel(("thumbnail", index))
+            self._engine.cancel(self._key(index))
             self._requested.discard(index)
 
     def _on_rendered(self, item: PageItem, reply: dict, pixels: bytes) -> None:

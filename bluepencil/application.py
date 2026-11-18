@@ -31,6 +31,7 @@ _SHORTCUTS = {
     "win.redo": ["<primary><shift>z", "<primary>y"],
     "win.rotate-left": ["<primary>bracketleft"],
     "win.rotate-right": ["<primary>bracketright"],
+    "win.organize": ["<primary>g"],
 }
 
 
