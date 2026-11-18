@@ -1,5 +1,7 @@
 # Bluepencil
 
+[![Tests](https://github.com/prakhar-ktyr/bluepencil/actions/workflows/tests.yml/badge.svg)](https://github.com/prakhar-ktyr/bluepencil/actions/workflows/tests.yml)
+
 A PDF app for Ubuntu and other Linux desktops: view, edit, sign, organize and
 convert PDFs in one window, with every file staying on your computer.
 

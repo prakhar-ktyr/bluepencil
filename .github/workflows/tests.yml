@@ -1,0 +1,58 @@
+# SPDX-FileCopyrightText: 2026 Prakhar Katiyar
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Runs the checks and tests on both Ubuntu versions the plan supports
+# (plan, D8): 24.04 is the compatibility floor, 26.04 the newest release.
+# Each runs in that release's own container, with GTK and libadwaita from
+# its archive, exactly as a developer would install them.
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Ubuntu ${{ matrix.ubuntu }}
+    runs-on: ubuntu-24.04
+    container: ubuntu:${{ matrix.ubuntu }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu: ["24.04", "26.04"]
+    steps:
+      - name: Install GTK, libadwaita and a hidden display
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install --yes --no-install-recommends \
+            python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 python3-venv xvfb xauth \
+            adwaita-icon-theme fonts-cantarell ca-certificates
+
+      - uses: actions/checkout@v5
+
+      - name: Versions
+        run: |
+          . /etc/os-release && echo "$PRETTY_NAME"
+          python3 --version
+          python3 -c 'import gi; gi.require_version("Gtk", "4.0"); gi.require_version("Adw", "1"); from gi.repository import Adw, Gtk; print("GTK", Gtk.get_major_version(), Gtk.get_minor_version(), Gtk.get_micro_version()); print("libadwaita", Adw.get_major_version(), Adw.get_minor_version(), Adw.get_micro_version())'
+
+      - name: Set up
+        run: ./dev setup
+
+      - name: Lint and type checks
+        run: ./dev check
+
+      - name: Tests
+        run: ./dev test

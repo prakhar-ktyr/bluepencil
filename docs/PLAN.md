@@ -449,7 +449,10 @@ release. Anything risky gets a small experiment before its milestone starts.
       agreement (for example the free CLA Assistant app on GitHub)
 - [ ] Reserve the name `bluepencil` on the Snap Store
 - [x] Decision 6: compatibility floor raised to Ubuntu 24.04 (18 November 2026)
-- [ ] CI: run the tests on every push, on Ubuntu 24.04 and 26.04
+- [ ] CI: run the tests on every push, on Ubuntu 24.04 and 26.04. The
+      workflow is written (`.github/workflows/tests.yml`: each version in its
+      own container, `./dev check` then `./dev test`) and passes actionlint;
+      tick this once its first run on GitHub is green
 - [x] `./dev check` for lint and type checks (ruff and mypy, exact versions),
       plus tests that every source file has its licence lines and that
       `core/` and the interface keep to their sides (rule 2 in section 11)
