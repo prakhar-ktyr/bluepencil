@@ -81,13 +81,10 @@ def test_pdf_from_command_line_is_opened(tmp_path) -> None:
 
 def test_about_window_shows_the_licence() -> None:
     def check(window: BluepencilWindow) -> None:
-        about = build_about_dialog(window)
-        try:
-            assert about.get_license_type() == Gtk.License.AGPL_3_0
-            assert about.get_copyright() == COPYRIGHT
-            assert about.get_program_name() == APP_NAME
-        finally:
-            about.destroy()
+        about = build_about_dialog()
+        assert about.get_license_type() == Gtk.License.AGPL_3_0
+        assert about.get_copyright() == COPYRIGHT
+        assert about.get_application_name() == APP_NAME
 
     run_app(check)
 

@@ -255,7 +255,7 @@ One window per document until 1.0, then tabs.
 
 | Part | Choice | Why |
 |---|---|---|
-| Language | Python 3.10 or newer | Quick to write and test; the strongest PDF libraries |
+| Language | Python 3.12 or newer | Quick to write and test; the strongest PDF libraries |
 | Interface | GTK 4 with libadwaita | The native toolkit of Ubuntu's desktop |
 | PDF engine | PyMuPDF, exact version pinned | One library covers rendering, text, annotations, forms, redaction, compression and OCR |
 | Process layout | Interface, PDF engine and heavy jobs in separate processes | Keeps the interface smooth and survives engine crashes (5.3, D1) |
@@ -374,24 +374,27 @@ recovery copies and thumbnails: `~/.cache/bluepencil/`. Inside the snap these
 paths sit under `~/snap/bluepencil/`. Settings are a plain JSON file, which
 needs no installation step when running from source.
 
-**D8. Compatibility floor: GTK 4.6, libadwaita 1.1, Python 3.10.** That is
-Ubuntu 22.04, which the development machine ran until 17 November 2026
-(see Decision 6). The store build runs on a newer runtime
-(GTK 4.18 and Python 3.12 in the `core24` GNOME runtime), so code written for
-the floor runs in both places, and CI tests both.
+**D8. Compatibility floor: GTK 4.14, libadwaita 1.5, Python 3.12.** That is
+Ubuntu 24.04, the development machine since 17 November 2026 (Decision 6).
+The store build brings its own, newer copies (GTK 4.18, libadwaita 1.7 and
+Python 3.12 in the `core24` GNOME runtime, checked on 18 November 2026), so
+code written for the floor runs in both places, and CI tests both. The floor
+only matters when running from source: users of the store build get the
+bundled libraries on any Ubuntu from 20.04 on.
 
-| Do not use (too new for the floor) | Use instead |
-|---|---|
-| `Adw.ToolbarView`, `Adw.NavigationSplitView`, `Adw.OverlaySplitView`, `Adw.Breakpoint` | `Gtk.Box`, `Adw.Flap`, `Adw.Leaflet` |
-| `Adw.Dialog`, `Adw.AlertDialog`, `Adw.MessageDialog`, `Adw.AboutWindow` | `Gtk.Window`, `Gtk.MessageDialog`, `Gtk.AboutDialog` |
-| `Adw.Banner`, `Adw.EntryRow`, `Adw.SpinRow`, `Adw.SwitchRow` | `Gtk.InfoBar`, `Adw.ActionRow` with a child widget |
-| `Gtk.FileDialog`, `Gtk.ColorDialog`, `Gtk.AlertDialog`, `Gtk.FontDialog` | `Gtk.FileChooserNative`, `Gtk.ColorButton`, `Gtk.MessageDialog` |
+Everything in GTK 4.14 and libadwaita 1.5 is available, including
+`Adw.ToolbarView`, `Adw.OverlaySplitView`, `Adw.Breakpoint`, `Adw.Dialog`,
+`Adw.AlertDialog`, `Adw.AboutDialog` and `Gtk.FileDialog`. Too new for the
+floor (confirmed missing on the development machine):
 
-Available on the floor and used freely: `Adw.TabView`, `Adw.PreferencesWindow`,
-`Adw.StatusPage`, `Adw.ToastOverlay`, `Adw.ViewSwitcher`, `Gtk.GridView`,
-`Gtk.ShortcutsWindow`, `Gtk.DropTarget`, `Gtk.GestureStylus`, `Gtk.GestureZoom`.
-Some of the replacements are marked as deprecated in newer versions; they
-still work there, and they are swapped out when the floor rises (Decision 6).
+| Do not use | Added in | Use instead |
+|---|---|---|
+| `Adw.Spinner`, `Adw.BottomSheet`, `Adw.MultiLayoutView`, `Adw.ButtonRow` | libadwaita 1.6 | `Gtk.Spinner`, `Adw.Dialog`, `Adw.Breakpoint`, `Adw.ActionRow` |
+| `Adw.ToggleGroup`, `Adw.WrapBox`, `Adw.InlineViewSwitcher` | libadwaita 1.7 | linked `Gtk.ToggleButton`s, `Gtk.FlowBox`, `Adw.ViewSwitcher` |
+| `Adw.ShortcutsDialog` | libadwaita 1.8 | `Gtk.ShortcutsWindow` |
+
+When unsure, check the "Available since" line in the documentation, or run
+the code on Ubuntu 24.04.
 
 ### 5.4 What has been tested already
 
@@ -436,7 +439,8 @@ release. Anything risky gets a small experiment before its milestone starts.
 - [ ] Before accepting any outside code: set up a contributor licence
       agreement (for example the free CLA Assistant app on GitHub)
 - [ ] Reserve the name `bluepencil` on the Snap Store
-- [ ] CI: run the tests on every push, on Ubuntu 22.04 and 24.04
+- [x] Decision 6: compatibility floor raised to Ubuntu 24.04 (18 November 2026)
+- [ ] CI: run the tests on every push, on Ubuntu 24.04 and 26.04
 - [ ] `./dev check` for lint and type checks
 
 ### Milestone 1: Viewer (1.5–2.5 weekends)
@@ -741,7 +745,7 @@ file, submitted as a pull request on GitHub and reviewed by volunteers.
 | The sandbox blocks something users expect, such as printing or dragging files in. | Package in Milestone 4, not at the end. Test inside the snap at every release. |
 | Redaction leaves recoverable content. | Full-rewrite saves only (D5), a verification pass on every output, and safety tests that block releases. |
 | Text editing looks wrong when fonts do not match. | Scope limited to line-level fixes; the user is told when a substitute font is used. |
-| Two GTK generations: 4.6 on the development machine, 4.18 in the store build. | The compatibility floor (D8) and CI on both. |
+| Two GTK versions: 4.14 on the development machine, 4.18 in the store build. | The compatibility floor (D8) and CI on both. |
 | A new engine version changes behaviour. | Pin the exact version; upgrade deliberately, with the whole test suite. |
 | One maintainer and a long feature list. | Small releases that each stand alone, the "will not be" list in section 2, and scope guards on the hard features. |
 | The name collides with a trademark. | Not checked yet. Check before 1.0, while a rename is still cheap. |
@@ -757,7 +761,7 @@ file, submitted as a pull request on GitHub and reviewed by volunteers.
 | 3 | Which OCR languages ship in the snap? | English plus a short list chosen then; others can be added as files | Release 1.2 |
 | 4 | Office-to-PDF conversion needs LibreOffice, about 300 MB. Bundle it? | No. Leave conversion out until there is a lighter way. | When Convert starts |
 | 5 | An offline assistant needs a model of 2–4 GB. How does it arrive without network access? | The user downloads a model file separately and points Bluepencil at it. | When the assistant starts |
-| 6 | When does the compatibility floor rise above Ubuntu 22.04? | **Now due:** the development machine moved to Ubuntu 24.04 on 17 November 2026. Raise the floor to GTK 4.14, libadwaita 1.5 and Python 3.12, which the store build's runtime also meets. | Before Milestone 1 |
+| 6 | When does the compatibility floor rise above Ubuntu 22.04? | **Settled 18 November 2026:** raised to Ubuntu 24.04 (GTK 4.14, libadwaita 1.5, Python 3.12) after the development machine was upgraded | Done |
 
 **Decision 1, settled 18 November 2026: open source.** Bluepencil is licensed
 under the GNU Affero General Public License, version 3 or later. Its PDF
@@ -792,7 +796,7 @@ harder. What follows from the decision:
    plain data, nothing else.
 3. Every engine feature ships with tests. Every bug fix starts with a test that
    fails.
-4. Nothing newer than GTK 4.6 and libadwaita 1.1 (D8).
+4. Nothing newer than GTK 4.14 and libadwaita 1.5 (D8).
 5. No network code. No telemetry.
 6. Never write to a user's file without an explicit Save. Destructive tools
    default to "Save a copy".

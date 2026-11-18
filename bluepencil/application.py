@@ -14,23 +14,19 @@ from . import APP_ID, APP_NAME, APP_SUMMARY, COPYRIGHT, VERSION  # noqa: E402
 from .window import BluepencilWindow  # noqa: E402
 
 
-def build_about_dialog(parent: Gtk.Window | None) -> Gtk.AboutDialog:
+def build_about_dialog() -> Adw.AboutDialog:
     """The About window.
 
     It also carries the notice the AGPL asks interactive programs to show:
     the copyright, that there is no warranty, and which licence applies.
     """
-    # Gtk.AboutDialog, not Adw.AboutWindow: Ubuntu 22.04 ships
-    # libadwaita 1.1 and AboutWindow needs 1.2.
-    return Gtk.AboutDialog(
-        transient_for=parent,
-        modal=True,
-        program_name=APP_NAME,
+    return Adw.AboutDialog(
+        application_name=APP_NAME,
+        application_icon="x-office-document",
         version=VERSION,
         comments=APP_SUMMARY,
         copyright=COPYRIGHT,
         license_type=Gtk.License.AGPL_3_0,
-        logo_icon_name="x-office-document",
     )
 
 
@@ -74,4 +70,4 @@ class BluepencilApplication(Adw.Application):
             self.set_accels_for_action(f"app.{name}", shortcuts)
 
     def _on_about(self, *_args: object) -> None:
-        build_about_dialog(self.props.active_window).present()
+        build_about_dialog().present(self.props.active_window)

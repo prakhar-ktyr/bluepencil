@@ -1,16 +1,12 @@
 # SPDX-FileCopyrightText: 2026 Prakhar Katiyar
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The main window: header bar, Open button and the document area.
-
-Written against GTK 4.6 and libadwaita 1.1 (Ubuntu 22.04), so it avoids
-newer widgets such as Adw.ToolbarView and Gtk.FileDialog.
-"""
+"""The main window: header bar, Open button and the document area."""
 
 import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gio, Gtk  # noqa: E402
+from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 
 from . import APP_NAME  # noqa: E402
 
@@ -22,9 +18,6 @@ class BluepencilWindow(Adw.ApplicationWindow):
         self.set_default_size(1000, 700)
 
         self.current_file: Gio.File | None = None
-        # Gtk.FileChooserNative is not kept alive by GTK itself; without this
-        # reference Python frees it and the dialog never answers.
-        self._chooser: Gtk.FileChooserNative | None = None
 
         open_action = Gio.SimpleAction.new("open", None)
         open_action.connect("activate", self._on_open_clicked)
@@ -53,10 +46,9 @@ class BluepencilWindow(Adw.ApplicationWindow):
 
         self._toasts = Adw.ToastOverlay(child=self._status)
 
-        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        content.append(header)
-        content.append(self._toasts)
-        self.set_content(content)
+        toolbar = Adw.ToolbarView(content=self._toasts)
+        toolbar.add_top_bar(header)
+        self.set_content(toolbar)
 
     def open_file(self, file: Gio.File) -> None:
         """Make `file` the window's current document."""
@@ -81,23 +73,27 @@ class BluepencilWindow(Adw.ApplicationWindow):
         )
 
     def _on_open_clicked(self, *_args: object) -> None:
-        pdf_filter = Gtk.FileFilter()
-        pdf_filter.set_name("PDF documents")
+        pdf_filter = Gtk.FileFilter(name="PDF documents")
         pdf_filter.add_mime_type("application/pdf")
-        pdf_filter.add_pattern("*.pdf")
+        pdf_filter.add_suffix("pdf")
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(pdf_filter)
 
-        self._chooser = Gtk.FileChooserNative.new(
-            "Open PDF", self, Gtk.FileChooserAction.OPEN, "_Open", "_Cancel"
+        dialog = Gtk.FileDialog(
+            title="Open PDF",
+            modal=True,
+            filters=filters,
+            default_filter=pdf_filter,
         )
-        self._chooser.set_modal(True)
-        self._chooser.add_filter(pdf_filter)
-        self._chooser.connect("response", self._on_chooser_response)
-        self._chooser.show()
+        dialog.open(self, None, self._on_file_chosen)
 
-    def _on_chooser_response(
-        self, chooser: Gtk.FileChooserNative, response: int
-    ) -> None:
-        file = chooser.get_file() if response == Gtk.ResponseType.ACCEPT else None
-        self._chooser = None
+    def _on_file_chosen(self, dialog: Gtk.FileDialog, result: Gio.AsyncResult) -> None:
+        try:
+            file = dialog.open_finish(result)
+        except GLib.Error as error:
+            # Closing the dialog without choosing a file is not an error.
+            if not error.matches(Gtk.dialog_error_quark(), Gtk.DialogError.DISMISSED):
+                self._toasts.add_toast(Adw.Toast(title=f"Could not open the file: {error.message}"))
+            return
         if file is not None:
             self.open_file(file)

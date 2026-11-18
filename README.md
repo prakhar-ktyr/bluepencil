@@ -8,7 +8,7 @@ does not display pages yet. The page viewer is the next feature.
 
 ## Run from source
 
-Bluepencil is written in Python with GTK 4 and libadwaita. On Ubuntu 22.04 or
+Bluepencil is written in Python with GTK 4 and libadwaita. On Ubuntu 24.04 or
 newer, install the toolkit once:
 
 ```

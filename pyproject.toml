@@ -8,7 +8,7 @@ description = "Edit, sign, organize and convert PDFs, fully offline"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
 license-files = ["LICENSE"]
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dynamic = ["version"]
 # GTK 4 and libadwaita (PyGObject) come from the system, or from the GNOME
 # platform inside the snap, so they are deliberately not listed here.
