@@ -6,15 +6,16 @@ This is the working plan for the project: what the app is, every feature it
 will have, how it is built, and the order of work. Tick the checkboxes as work
 lands, and change the plan when reality disagrees with it.
 
-**Where things stand:** Milestones 1 (viewer) and 2 (organize pages) are
-built, with 163 tests. Bluepencil opens, shows and remembers PDFs; rotates,
+**Where things stand:** Milestones 1 (viewer), 2 (organize pages) and 3
+(compress) are built, with 174 tests. Bluepencil opens, shows and remembers PDFs; rotates,
 deletes, duplicates, moves, inserts, extracts and splits pages, alone or many
 at once in Organize mode; combines files; undoes and redoes every change;
-saves safely; and keeps unsaved changes through an engine crash or a crash
-of the whole app. Left in these milestones: checks by hand on a real desktop
+saves safely; keeps unsaved changes through an engine crash or a crash of
+the whole app; and compresses to a smaller copy with four presets. Left in these milestones: checks by hand on a real desktop
 (scrolling, memory, dragging pages, files opened in other apps after saving).
-**Next action:** try it by hand (`./dev`), then Milestone 3, Compress.
-Alongside it: reserve the Snap Store name.
+**Next action:** try it by hand (`./dev`), then Milestone 4: package and
+publish 0.1. It needs the Snap Store name reserved first (only the owner of
+the Ubuntu One account can do that).
 
 ## Contents
 
@@ -591,16 +592,20 @@ Tests
 **Done when:** reorder, rotate, delete, merge and split all work with undo, and
 no test or manual check can make the app lose or corrupt a file.
 
-### Milestone 3: Compress (half a weekend)
+### Milestone 3: Compress (half a weekend; built 19 November 2026)
 
-- [ ] `core/compress.py` with four presets: Email (images to about 96 dpi),
+- [x] `core/compress.py` with four presets: Email (images to about 96 dpi),
       Balanced (150 dpi), Print (300 dpi) and Lossless (clean-up only). It
       downsamples and recompresses images, subsets fonts and removes unused
-      objects.
-- [ ] Runs as a job process (D2) with progress and cancel
-- [ ] Dialog: choose a preset, see the real resulting size, "Save a copy as…"
-- [ ] If the result is not smaller, say so and keep the original
-- [ ] Tests: output is smaller on an image-heavy sample; page count and text
+      objects. Black-and-white scans are left alone (JPEG would enlarge them),
+      and Print keeps lossless pictures lossless.
+- [x] Runs as a job process (D2) with progress and cancel (`core/jobs.py`,
+      `job_client.py`); the password travels through the pipe, never on the
+      command line
+- [x] Dialog: choose a preset, see the real resulting size, "Save a copy as…";
+      unsaved changes are included, and the open file can never be the target
+- [x] If the result is not smaller, say so and keep the original
+- [x] Tests: output is smaller on an image-heavy sample; page count and text
       are unchanged; pages look the same within a tolerance
 
 ### Milestone 4: Package and publish 0.1 (1 weekend, plus store review)

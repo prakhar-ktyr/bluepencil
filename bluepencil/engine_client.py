@@ -37,6 +37,16 @@ MAX_IN_FLIGHT = 2
 _PACKAGE_ROOT = str(Path(__file__).resolve().parent.parent)
 
 
+def start_child(module: str, *, text: bool = False) -> subprocess.Popen:
+    """Start `python -m module` from this copy of Bluepencil, with pipes for
+    its standard input and output."""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(filter(None, [_PACKAGE_ROOT, env.get("PYTHONPATH")]))
+    return subprocess.Popen(
+        [sys.executable, "-m", module], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=env, text=text
+    )
+
+
 class EngineClient(GObject.Object):
     """One engine process. It can be started again after a crash."""
 
@@ -68,14 +78,7 @@ class EngineClient(GObject.Object):
         """Start the engine process, unless it is already running."""
         if self._process is not None:
             return
-        env = dict(os.environ)
-        env["PYTHONPATH"] = os.pathsep.join(filter(None, [_PACKAGE_ROOT, env.get("PYTHONPATH")]))
-        process = subprocess.Popen(
-            [sys.executable, "-m", "bluepencil.core.engine"],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            env=env,
-        )
+        process = start_child("bluepencil.core.engine")
         self._process = process
         threading.Thread(
             target=self._read_replies,

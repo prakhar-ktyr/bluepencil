@@ -10,7 +10,8 @@ password-protected ones, and shows their pages with zoom, page navigation and
 a thumbnail sidebar. It lists recent files and reopens each one where you
 left it. In Organize mode (Ctrl+G) it rotates, deletes, duplicates, moves,
 inserts, extracts and splits pages, and it combines several PDFs and pictures
-into one. Every change can be undone, and nothing is written until you save.
+into one. It compresses files into a smaller copy (Menu ▸ Compress). Every
+change can be undone, and nothing is written until you save.
 
 ## Run from source
 

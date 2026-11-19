@@ -4,6 +4,7 @@
 
 import functools
 import inspect
+import shutil
 import time
 import weakref
 from collections.abc import Callable
@@ -17,10 +18,12 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
 from . import APP_NAME  # noqa: E402
+from .core.places import jobs_root  # noqa: E402
 from .engine_client import EngineClient  # noqa: E402
 from .history import History  # noqa: E402
 from .i18n import _  # noqa: E402
 from .recovery import Recoverable  # noqa: E402
+from .ui.compress_dialog import CompressDialog  # noqa: E402
 from .ui.document_view import DocumentView, FitMode  # noqa: E402
 from .ui.organize import OrganizeView  # noqa: E402
 from .ui.split_dialog import SplitDialog  # noqa: E402
@@ -124,7 +127,12 @@ class BluepencilWindow(Adw.ApplicationWindow):
         super().__init__(**kwargs)
         self.set_title(APP_NAME)
         self.set_default_size(1000, 760)
+        self._init_state()
+        self._add_actions()
+        self._title = Adw.WindowTitle(title=APP_NAME)
+        self._build_window_content()
 
+    def _init_state(self) -> None:
         #: The file on show, once it has opened.
         self.current_file: Gio.File | None = None
         #: The page view and the thumbnails, while a file is on show.
@@ -150,13 +158,14 @@ class BluepencilWindow(Adw.ApplicationWindow):
         self._discard_confirmed = False
         #: The page grid, while Organize mode is on.
         self.organize: OrganizeView | None = None
+        #: The Compress dialog, while it is open.
+        self.compress_dialog: CompressDialog | None = None
         self._actions: dict[str, Gio.SimpleAction] = {}
         #: Rows of the recent files list, with the path each one opens.
         self._recent_rows: list[tuple[str, Adw.ActionRow]] = []
         self._history_handler = 0
-        self._add_actions()
 
-        self._title = Adw.WindowTitle(title=APP_NAME)
+    def _build_window_content(self) -> None:
         header = self._build_header()
 
         self._status = self._build_status_page()
@@ -677,6 +686,7 @@ class BluepencilWindow(Adw.ApplicationWindow):
             "save": ready and bool(self._state.get("modified")),
             "combine": True,
             "split": ready,
+            "compress": ready,
             "save-as": ready,
             "organize": self.current_file is not None,
             **dict.fromkeys(_PAGE_ACTIONS, ready),
@@ -799,6 +809,7 @@ class BluepencilWindow(Adw.ApplicationWindow):
         add("insert-blank", self._on_insert_blank)
         add("insert-files", self._on_insert_files)
         add("split", self._on_split)
+        add("compress", self._on_compress)
         organize = Gio.SimpleAction.new_stateful("organize", None, GLib.Variant.new_boolean(False))
         organize.connect("change-state", weakly(self._on_toggle_organize))
         self.add_action(organize)
@@ -913,6 +924,65 @@ class BluepencilWindow(Adw.ApplicationWindow):
             return
         stem = _display_name(self.current_file).removesuffix(".pdf")
         self._send({"op": "split", "groups": groups, "folder": folder, "stem": stem})
+
+    # Compress
+
+    def _on_compress(self, *_args: object) -> None:
+        if self.current_file is None:
+            return
+        # What is on screen, unsaved changes included.
+        history = self._state.get("history")
+        if self._state.get("modified") and history:
+            source = history["files"][history["position"]]
+        else:
+            source = self.current_file.get_path()
+        on_disk = Path(self.current_file.get_path())
+        size = (on_disk if on_disk.exists() else Path(source)).stat().st_size
+        dialog = CompressDialog(source, self._password, size, jobs_root())
+        dialog.connect("save-requested", weakly(self._on_compressed_save_requested))
+        self.compress_dialog = dialog
+        dialog.present(self)
+
+    def _on_compressed_save_requested(self, dialog: CompressDialog, _result: str) -> None:
+        if self.current_file is None:
+            return
+        stem = _display_name(self.current_file).removesuffix(".pdf")
+        chooser = Gtk.FileDialog(
+            title=_("Save a Smaller Copy"), modal=True, initial_name=_("{name} (smaller).pdf").format(name=stem)
+        )
+        folder = self.current_file.get_parent()
+        if folder is not None and folder.query_exists(None):
+            chooser.set_initial_folder(folder)
+        chooser.save(self, None, weakly(self._on_compressed_target_chosen), dialog)
+
+    def _on_compressed_target_chosen(
+        self, chooser: Gtk.FileDialog, result: Gio.AsyncResult, dialog: CompressDialog
+    ) -> None:
+        try:
+            file = chooser.save_finish(result)
+        except GLib.Error:
+            return
+        if file is not None and file.get_path() is not None:
+            self.save_compressed_copy(dialog, file.get_path())
+
+    def save_compressed_copy(self, dialog: CompressDialog, path: str) -> None:
+        """Put the smaller copy at `path` and close the dialog."""
+        if dialog.result_path is None:
+            return
+        if not path.lower().endswith(".pdf"):
+            path += ".pdf"
+        if self.current_file is not None and Path(path) == Path(self.current_file.get_path()):
+            # The open document is never replaced by a compressed copy.
+            self._toast(_("Choose another name: compressing keeps the original as it is."))
+            return
+        try:
+            shutil.move(dialog.result_path, path)
+        except OSError as error:
+            self._toast(_("Could not save the smaller copy: {reason}").format(reason=error.strerror))
+            return
+        dialog.result_path = None
+        dialog.close()
+        self._toast(_("Saved a smaller copy as “{name}”").format(name=Path(path).name))
 
     # Organize mode
 
@@ -1041,6 +1111,8 @@ class BluepencilWindow(Adw.ApplicationWindow):
         page.append(_("Insert Pages or Pictures…"), "win.insert-files")
         page.append(_("Extract…"), "win.extract-pages")
         page.append(_("Split…"), "win.split")
+        tools = Gio.Menu()
+        tools.append(_("Compress…"), "win.compress")
         app = Gio.Menu()
         app.append(_("About {name}").format(name=APP_NAME), "app.about")
         app.append(_("Quit"), "app.quit")
@@ -1048,6 +1120,7 @@ class BluepencilWindow(Adw.ApplicationWindow):
         menu.append_section(None, files)
         menu.append_section(None, edits)
         menu.append_section(_("Pages"), page)
+        menu.append_section(_("Tools"), tools)
         menu.append_section(None, app)
         return Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu, tooltip_text=_("Main Menu"))
 

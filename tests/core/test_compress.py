@@ -3,7 +3,6 @@
 """Compression, called directly and as a job process."""
 
 import json
-import random
 import subprocess
 import sys
 from pathlib import Path
@@ -13,21 +12,6 @@ import pytest
 
 from bluepencil.core.compress import PRESETS, CompressError, compress
 from bluepencil.core.document import KEEP_ENCRYPTION
-
-
-@pytest.fixture
-def photos(tmp_path):
-    """Two small pages, each a 300-dpi photo stored without loss, plus a line of text."""
-    noise = random.Random(7)
-    document = pymupdf.open()
-    for number in (1, 2):
-        page = document.new_page(width=216, height=288)  # 3 by 4 inches
-        picture = pymupdf.Pixmap(pymupdf.csRGB, 900, 1200, noise.randbytes(900 * 1200 * 3), False)
-        page.insert_image(page.rect, pixmap=picture)
-        page.insert_text((20, 40), f"Page {number}", fontsize=18)
-    path = tmp_path / "photos.pdf"
-    document.save(path, deflate=True)
-    return path
 
 
 def texts(path, password=None) -> list[str]:

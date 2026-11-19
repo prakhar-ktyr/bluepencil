@@ -16,3 +16,8 @@ def snapshots_root() -> Path:
     cache = os.environ.get("XDG_CACHE_HOME", "")
     base = Path(cache) if Path(cache).is_absolute() else Path.home() / ".cache"
     return base / "bluepencil" / "snapshots"
+
+
+def jobs_root() -> Path:
+    """Where heavy jobs leave their results until the user saves them."""
+    return snapshots_root().parent / "jobs"
