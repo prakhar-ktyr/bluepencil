@@ -7,7 +7,7 @@ will have, how it is built, and the order of work. Tick the checkboxes as work
 lands, and change the plan when reality disagrees with it.
 
 **Where things stand:** Milestones 1 (viewer), 2 (organize pages) and 3
-(compress) are built, with 210 tests, and Milestone 4 (package) has its
+(compress) are built, with 213 tests, and Milestone 4 (package) has its
 icon, desktop file, store metadata and a first snap recipe. Bluepencil opens, shows and remembers PDFs; rotates,
 deletes, duplicates, moves, inserts, extracts and splits pages, alone or many
 at once in Organize mode; combines files from any folders, put in order
@@ -581,9 +581,12 @@ Interface
       in order in the Combine list, then the pages in the grid; Save asks
       where the new document goes
 - [x] The Combine list numbers the files in their order and shows each one's
-      first page and page count. Files move by dragging or with Alt and the
-      arrow keys; Add Files… and dropping from the Files app bring in files
-      from any folder; files that cannot be combined say why, and locked PDFs
+      first page and page count. Files move by dragging any part of them
+      (the pointer turns into a hand), or from each file's menu, which shows
+      the keys: Alt with ↑, ↓, Home or End moves the focused file. As in
+      GNOME Settings, nothing depends on dragging, and moves are announced
+      to screen readers. Add Files… and dropping from the Files app bring in
+      files from any folder; files that cannot be combined say why, and locked PDFs
       are unlocked there (the new PDF has no password). Dropping several
       files on the window opens it. Files are read in an engine process of
       the list's own, one at a time, so a file that crashes the PDF library

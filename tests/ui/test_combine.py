@@ -13,6 +13,8 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gdk, Gio, Gtk  # noqa: E402
 
+from bluepencil.ui.combine_dialog import FileRow  # noqa: E402
+
 from .test_organize import drop_target_of  # noqa: E402
 
 
@@ -41,6 +43,25 @@ def titles(dialog) -> list[str]:
 
 def numbers(dialog) -> list[str]:
     return [row.number.get_label() for row in dialog.rows()]
+
+
+def descendants(widget):
+    yield widget
+    child = widget.get_first_child()
+    while child is not None:
+        yield from descendants(child)
+        child = child.get_next_sibling()
+
+
+def menu_items(row) -> dict[str, tuple[Gtk.Widget, str]]:
+    """The items of the file's open menu, by label: each item, and the
+    shortcut it shows."""
+    items = {}
+    for widget in descendants(row.menu_button.get_popover()):
+        if type(widget).__name__ == "GtkModelButton":
+            label, *keys = [text.get_label() for text in descendants(widget) if isinstance(text, Gtk.Label)]
+            items[label] = (widget, "".join(keys))
+    return items
 
 
 def widths(window) -> list[int]:
@@ -95,8 +116,10 @@ def test_more_files_can_be_added_from_another_folder(run_app, make_pdf, tmp_path
     run_app(lambda window: window.show_combine_list([first]), (all_read, add), (all_read, check))
 
 
-def test_files_move_with_alt_and_the_arrow_keys_and_delete_removes_them(run_app, make_pdf):
+def test_the_focused_file_moves_with_alt_and_the_arrow_keys_and_delete_removes_it(run_app, make_pdf, monkeypatch):
     paths = [str(make_pdf(f"{name}.pdf", pages=1)) for name in ("a", "b", "c")]
+    said: list[str] = []
+    monkeypatch.setattr(FileRow, "announce", lambda _row, message, _priority: said.append(message))
 
     def press(window, key: int, state: Gdk.ModifierType = Gdk.ModifierType.ALT_MASK) -> bool:
         return window.combine_dialog._on_key_pressed(None, key, 0, state)
@@ -107,18 +130,127 @@ def test_files_move_with_alt_and_the_arrow_keys_and_delete_removes_them(run_app,
         assert press(window, Gdk.KEY_Down)
         assert titles(dialog) == ["b.pdf", "a.pdf", "c.pdf"]
         assert numbers(dialog) == ["1", "2", "3"]
-        assert dialog._focused_row() is dialog.rows()[1]  # the moved file keeps the focus
+        assert dialog.get_focus() is dialog.rows()[1]  # the moved file keeps the focus
+        assert said == ["Moved to position 2 of 3"]  # for screen readers
         assert press(window, Gdk.KEY_Down)
         assert press(window, Gdk.KEY_Down)  # already last: nothing moves
         assert titles(dialog) == ["b.pdf", "c.pdf", "a.pdf"]
+        assert len(said) == 2
+        # From one of its buttons too, which keeps the focus.
+        dialog.rows()[2].menu_button.grab_focus()
         assert press(window, Gdk.KEY_Up)
         assert titles(dialog) == ["b.pdf", "a.pdf", "c.pdf"]
+        assert dialog.get_focus().is_ancestor(dialog.rows()[1].menu_button)
         assert press(window, Gdk.KEY_Delete, Gdk.ModifierType(0))
         assert titles(dialog) == ["b.pdf", "c.pdf"]
         assert numbers(dialog) == ["1", "2"]
         assert dialog._focused_row() is dialog.rows()[1]  # the next file
 
     run_app(lambda window: window.show_combine_list(paths), (all_read, check))
+
+
+def test_each_file_has_a_menu_that_moves_it_and_shows_the_keys(run_app, make_pdf):
+    paths = [str(make_pdf(f"{name}.pdf", pages=1)) for name in ("a", "b", "c")]
+    state = {}
+
+    def open_first(window) -> None:
+        state["row"] = row = window.combine_dialog.rows()[0]
+        assert row.menu_button.get_tooltip_text() == "Move"
+        row.menu_button.popup()
+
+    def menu_open(_window) -> bool:
+        """the file's menu to open"""
+        return state["row"].menu_button.get_popover().get_mapped()
+
+    def move_to_bottom(window) -> None:
+        dialog, row = window.combine_dialog, state["row"]
+        items = menu_items(row)
+        assert {label: (keys, item.get_sensitive()) for label, (item, keys) in items.items()} == {
+            "Move Up": ("Alt+Up", False),  # already first
+            "Move Down": ("Alt+Down", True),
+            "Move to Top": ("Alt+Home", False),
+            "Move to Bottom": ("Alt+End", True),
+        }
+        items["Move to Bottom"][0].emit("clicked")
+        assert titles(dialog) == ["b.pdf", "c.pdf", "a.pdf"]
+        assert numbers(dialog) == ["1", "2", "3"]
+        assert not row.menu_button.get_popover().get_visible()
+        assert dialog.get_focus().is_ancestor(row.menu_button)  # ready to move it again
+        row.menu_button.popup()
+
+    def move_up(window) -> None:
+        dialog = window.combine_dialog
+        items = menu_items(state["row"])
+        assert [label for label, (item, _keys) in items.items() if item.get_sensitive()] == ["Move Up", "Move to Top"]
+        items["Move Up"][0].emit("clicked")
+        assert titles(dialog) == ["b.pdf", "a.pdf", "c.pdf"]
+        for row in dialog.rows()[1:]:
+            dialog.remove(row)
+        assert not dialog.rows()[0].menu_button.get_sensitive()  # a single file goes nowhere
+
+    run_app(
+        lambda window: window.show_combine_list(paths),
+        (all_read, open_first),
+        (menu_open, move_to_bottom),
+        (menu_open, move_up),
+    )
+
+
+def test_every_shortcut_in_the_menu_does_what_its_item_does(run_app, make_pdf):
+    paths = [str(make_pdf(f"{name}.pdf", pages=1)) for name in "abcde"]
+    # "c" moved from the middle.
+    expected = {
+        "row.move-up": "acbde",
+        "row.move-down": "abdce",
+        "row.move-to-top": "cabde",
+        "row.move-to-bottom": "abdec",
+    }
+
+    def order(dialog) -> str:
+        return "".join(title.removesuffix(".pdf") for title in titles(dialog))
+
+    def middle(dialog) -> FileRow:
+        """File "c", back in the middle and focused."""
+        row = next(row for row in dialog.rows() if row.get_title() == "c.pdf")
+        dialog.move(row.get_index(), 2 if row.get_index() > 2 else 3)
+        assert order(dialog) == "abcde"
+        row.grab_focus()
+        return row
+
+    def check(window) -> None:
+        dialog = window.combine_dialog
+        menu = dialog.rows()[0].menu_button.get_menu_model()
+        shown = {}
+        for section in range(menu.get_n_items()):
+            items = menu.get_item_link(section, Gio.MENU_LINK_SECTION)
+            for index in range(items.get_n_items()):
+                action = items.get_item_attribute_value(index, "action", None).get_string()
+                shown[action] = items.get_item_attribute_value(index, "accel", None).get_string()
+        assert set(shown) == set(expected)
+        for action, accel in shown.items():
+            middle(dialog).activate_action(action, None)
+            assert order(dialog) == expected[action], action
+            middle(dialog)
+            _ok, keyval, modifiers = Gtk.accelerator_parse(accel)
+            assert dialog._on_key_pressed(None, keyval, 0, modifiers)
+            assert order(dialog) == expected[action], accel
+
+    run_app(lambda window: window.show_combine_list(paths), (all_read, check))
+
+
+def test_the_pointer_shows_that_files_can_be_dragged_by_any_part(run_app, make_pdf):
+    def check(window) -> None:
+        row = window.combine_dialog.rows()[0]
+        assert row.get_cursor().get_name() == "grab"  # an open hand
+        for button in (row.unlock_button, row.menu_button, row.remove_button):
+            assert button.get_cursor().get_name() == "default"  # clicked, not dragged
+        drag = next(controller for controller in row.observe_controllers() if isinstance(controller, Gtk.DragSource))
+        drag.emit("begin", None)  # pressed
+        assert row.get_cursor().get_name() == "grabbing"
+        drag.emit("end", None)  # let go
+        assert row.get_cursor().get_name() == "grab"
+
+    run_app(lambda window: window.show_combine_list([str(make_pdf())]), (all_read, check))
 
 
 def test_dragged_files_and_dropped_files_land_where_they_are_dropped(run_app, make_pdf, tmp_path):

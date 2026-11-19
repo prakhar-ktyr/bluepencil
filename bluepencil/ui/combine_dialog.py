@@ -3,9 +3,10 @@
 """The Combine list: put files in order, from any folders, before combining.
 
 Each file shows its place in the order, its first page and its page count.
-Files are dragged into place, or moved with Alt and the arrow keys, so that
-nothing depends on dragging. Add Files… can be used again and again, in any
-folder, and files can be dropped on the list from the Files app.
+Files are dragged into place, or moved from their menus, which also show the
+shortcuts, so that nothing depends on dragging: the reorderable lists of
+GNOME Settings work the same way. Add Files… can be used again and again, in
+any folder, and files can be dropped on the list from the Files app.
 
 Files are read by an engine process of the list's own (plan, D1), one at a
 time: a file that crashes the PDF library is then known, and it cannot take
@@ -35,6 +36,34 @@ from .weak import weakly  # noqa: E402
 #: as big, so that it is sharp on high-resolution screens too.
 PREVIEW_SIZE = 48
 
+#: The moves of a file's menu, by action name, and their keys with Alt.
+MOVE_KEYS = {
+    "move-up": (Gdk.KEY_Up, Gdk.KEY_KP_Up),
+    "move-down": (Gdk.KEY_Down, Gdk.KEY_KP_Down),
+    "move-to-top": (Gdk.KEY_Home, Gdk.KEY_KP_Home),
+    "move-to-bottom": (Gdk.KEY_End, Gdk.KEY_KP_End),
+}
+
+
+def _move_menu() -> Gio.Menu:
+    """Each move, with its shortcut beside it: the menu teaches the keys."""
+    labels = {
+        "move-up": _("Move Up"),
+        "move-down": _("Move Down"),
+        "move-to-top": _("Move to Top"),
+        "move-to-bottom": _("Move to Bottom"),
+    }
+    menu = Gio.Menu()
+    for names in (("move-up", "move-down"), ("move-to-top", "move-to-bottom")):
+        section = Gio.Menu()
+        for name in names:
+            item = Gio.MenuItem.new(labels[name], f"row.{name}")
+            accel = Gtk.accelerator_name(MOVE_KEYS[name][0], Gdk.ModifierType.ALT_MASK)
+            item.set_attribute_value("accel", GLib.Variant.new_string(accel))
+            section.append_item(item)
+        menu.append_section(None, section)
+    return menu
+
 
 def files_filter() -> Gtk.FileFilter:
     """What the file chooser offers: PDFs and pictures."""
@@ -56,9 +85,16 @@ def _problem_text(code: str) -> str:
 
 
 class FileRow(Adw.ActionRow):
-    """One file of the list, with what the engine found out about it."""
+    """One file of the list, with what the engine found out about it.
+
+    Emits move-requested with the name of a move of MOVE_KEYS, chosen from
+    its menu.
+    """
 
     __gtype_name__ = "BluepencilCombineRow"
+    __gsignals__: dict[str, tuple] = {
+        "move-requested": (GObject.SignalFlags.RUN_LAST, None, (str,)),
+    }
 
     def __init__(self, path: str) -> None:
         name = Path(path).name
@@ -110,17 +146,46 @@ class FileRow(Adw.ActionRow):
             [Gtk.AccessibleProperty.LABEL], [_("Remove “{name}” from the list").format(name=name)]
         )
         self.remove_button.add_css_class("flat")
+
+        self._moves = Gio.SimpleActionGroup()
+        for move in MOVE_KEYS:
+            action = Gio.SimpleAction(name=move)
+            action.connect("activate", weakly(self._on_move_activated))
+            self._moves.add_action(action)
+        self.insert_action_group("row", self._moves)
+        self.menu_button = Gtk.MenuButton(
+            icon_name="view-more-symbolic", menu_model=_move_menu(), valign=Gtk.Align.CENTER, tooltip_text=_("Move")
+        )
+        self.menu_button.update_property([Gtk.AccessibleProperty.LABEL], [_("Move “{name}”").format(name=name)])
+        self.menu_button.add_css_class("flat")
         self.add_suffix(self.warning)
         self.add_suffix(self.unlock_button)
+        self.add_suffix(self.menu_button)
         self.add_suffix(self.remove_button)
+
+        # The whole row can be dragged, so the pointer is a hand all over it;
+        # its buttons are clicked, so they keep the arrow.
+        self.set_cursor_from_name("grab")
+        for button in (self.unlock_button, self.menu_button, self.remove_button):
+            button.set_cursor_from_name("default")
         self.show_reading()
 
     @property
     def needs_reading(self) -> bool:
         return self.pages is None and self.problem is None
 
-    def set_number(self, number: int) -> None:
+    def set_place(self, number: int, count: int) -> None:
+        """Show the file's place in the order, and offer only the moves that
+        go somewhere."""
         self.number.set_label(str(number))
+        for move in MOVE_KEYS:
+            action = self._moves.lookup_action(move)
+            if isinstance(action, Gio.SimpleAction):
+                action.set_enabled(number > 1 if move in ("move-up", "move-to-top") else number < count)
+        self.menu_button.set_sensitive(count > 1)
+
+    def _on_move_activated(self, action: Gio.SimpleAction, _parameter: GLib.Variant | None) -> None:
+        self.emit("move-requested", action.get_name())
 
     def show_reading(self) -> None:
         self.pages, self.problem = None, None
@@ -211,10 +276,7 @@ class CombineDialog(Adw.Dialog):
         keys.connect("key-pressed", weakly(self._on_key_pressed))
         self.list.add_controller(keys)
         hint = Gtk.Label(
-            label=_(
-                "Drag files to change the order, or use Alt+↑ and Alt+↓. "
-                "Add more from any folder, or drop them here."
-            ),
+            label=_("Drag files to change the order. Add more from any folder, or drop them here."),
             wrap=True,
             xalign=0,
         )
@@ -281,32 +343,52 @@ class CombineDialog(Adw.Dialog):
         for offset, path in enumerate(paths):
             row = FileRow(path)
             drag = Gtk.DragSource(actions=Gdk.DragAction.MOVE)
+            drag.connect("begin", weakly(self._on_drag_pressed))
+            drag.connect("end", weakly(self._on_drag_released))
             drag.connect("prepare", weakly(self._on_drag_prepare))
             drag.connect("drag-begin", weakly(self._on_drag_begin))
             drag.connect("drag-end", weakly(self._on_drag_end))
             row.add_controller(drag)
+            row.connect("move-requested", weakly(self._on_move_requested))
             row.remove_button.connect("clicked", weakly(self._on_remove_clicked))
             row.unlock_button.connect("clicked", weakly(self._on_unlock_clicked))
             self.list.insert(row, position + offset)
         self._update()
         self._read_next()
 
-    def move(self, index: int, to: int) -> None:
+    def move(self, index: int, to: int) -> bool:
         """Move file `index` to just before file `to`, counted before the move;
-        the number of files puts it last."""
+        the number of files puts it last. Says whether it moved."""
         rows = self.rows()
         if not (0 <= index < len(rows) and 0 <= to <= len(rows)):
-            return
+            return False
         destination = to - 1 if to > index else to
         if destination == index:
-            return
+            return False
         row = rows[index]
-        had_focus = self._focused_row() is row
+        focus = self.get_focus()
+        inside = focus is not None and (focus is row or focus.is_ancestor(row))
         self.list.remove(row)
         self.list.insert(row, destination)
         self._update()
-        if had_focus:
+        # Back where it was: on the file, or on one of its buttons.
+        if inside and not (focus.get_mapped() and focus.grab_focus()):
             row.grab_focus()
+        return True
+
+    def move_file(self, row: FileRow, move: str) -> None:
+        """Make one of the moves of MOVE_KEYS."""
+        rows = self.rows()
+        if row not in rows:
+            return
+        index = rows.index(row)
+        to = {"move-up": index - 1, "move-down": index + 2, "move-to-top": 0, "move-to-bottom": len(rows)}[move]
+        if self.move(index, min(max(to, 0), len(rows))):
+            # The number on its picture changed; screen readers say so.
+            row.announce(
+                _("Moved to position {position} of {count}").format(position=row.get_index() + 1, count=len(rows)),
+                Gtk.AccessibleAnnouncementPriority.MEDIUM,
+            )
 
     def remove(self, row: FileRow) -> None:
         rows = self.rows()
@@ -324,7 +406,7 @@ class CombineDialog(Adw.Dialog):
         """Number the files, and say what Combine will make."""
         rows = self.rows()
         for number, row in enumerate(rows, start=1):
-            row.set_number(number)
+            row.set_place(number, len(rows))
         self.stack.set_visible_child_name("files" if rows else "empty")
         problems = [row for row in rows if row.problem is not None]
         reading = any(row.needs_reading for row in rows)
@@ -408,6 +490,11 @@ class CombineDialog(Adw.Dialog):
         passwords = {row.path: row.password for row in rows if row.password is not None}
         self.emit("combine-requested", self.paths(), passwords)
 
+    def _on_move_requested(self, row: FileRow, move: str) -> None:
+        self.move_file(row, move)
+        # The menu has closed: back to its button, to move the file again.
+        row.menu_button.grab_focus()
+
     def _on_remove_clicked(self, button: Gtk.Button) -> None:
         row = button.get_ancestor(FileRow.__gtype__)
         if isinstance(row, FileRow):
@@ -471,15 +558,14 @@ class CombineDialog(Adw.Dialog):
     def _on_key_pressed(
         self, _controller: Gtk.EventControllerKey, keyval: int, _keycode: int, state: Gdk.ModifierType
     ) -> bool:
+        # The file with the keyboard focus, shown by the focus ring.
         row = self._focused_row()
         if row is None:
             return False
-        index, count = row.get_index(), len(self.rows())
         alt = bool(state & Gdk.ModifierType.ALT_MASK)
-        if alt and keyval in (Gdk.KEY_Up, Gdk.KEY_KP_Up):
-            self.move(index, index - 1)
-        elif alt and keyval in (Gdk.KEY_Down, Gdk.KEY_KP_Down):
-            self.move(index, min(index + 2, count))
+        move = next((move for move, keys in MOVE_KEYS.items() if keyval in keys), None)
+        if alt and move is not None:
+            self.move_file(row, move)
         elif keyval in (Gdk.KEY_Delete, Gdk.KEY_KP_Delete) and not alt:
             self.remove(row)
         else:
@@ -487,6 +573,12 @@ class CombineDialog(Adw.Dialog):
         return True
 
     # Dragging and dropping
+
+    def _on_drag_pressed(self, source: Gtk.DragSource, _sequence: Gdk.EventSequence | None) -> None:
+        source.get_widget().set_cursor_from_name("grabbing")
+
+    def _on_drag_released(self, source: Gtk.DragSource, _sequence: Gdk.EventSequence | None) -> None:
+        source.get_widget().set_cursor_from_name("grab")
 
     def _on_drag_prepare(self, source: Gtk.DragSource, x: float, y: float) -> Gdk.ContentProvider | None:
         row = source.get_widget()
@@ -501,7 +593,9 @@ class CombineDialog(Adw.Dialog):
         row.add_css_class("bp-dragged")
 
     def _on_drag_end(self, source: Gtk.DragSource, _drag: Gdk.Drag, _deleted: bool) -> None:
-        source.get_widget().remove_css_class("bp-dragged")
+        row = source.get_widget()
+        row.remove_css_class("bp-dragged")
+        row.set_cursor_from_name("grab")
 
     def drop_position(self, widget: Gtk.Widget, y: float) -> int:
         """Where something dropped at height `y` of `widget` goes: before the
