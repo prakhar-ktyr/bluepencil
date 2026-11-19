@@ -85,6 +85,18 @@ def _problem_text(code: str) -> str:
     }.get(code, _("This file can’t be read"))
 
 
+def announce(widget: Gtk.Widget, message: str) -> None:
+    """Have screen readers say `message`, once they are free.
+
+    Not through GTK's stand-in for a missing accessibility bus (as on a
+    server, or with GTK_A11Y=test): it has no way to announce, and GTK 4.14
+    to 4.18 at least crash when asked to.
+    """
+    context = widget.get_at_context()
+    if context is not None and context.__gtype__.name != "GtkTestATContext":
+        widget.announce(message, Gtk.AccessibleAnnouncementPriority.MEDIUM)
+
+
 class FileRow(Adw.ActionRow):
     """One file of the list, with what the engine found out about it.
 
@@ -387,9 +399,9 @@ class CombineDialog(Adw.Dialog):
         to = {"move-up": index - 1, "move-down": index + 2, "move-to-top": 0, "move-to-bottom": len(rows)}[move]
         if self.move(index, min(max(to, 0), len(rows))):
             # The number on its picture changed; screen readers say so.
-            row.announce(
+            announce(
+                row,
                 _("Moved to position {position} of {count}").format(position=row.get_index() + 1, count=len(rows)),
-                Gtk.AccessibleAnnouncementPriority.MEDIUM,
             )
 
     def remove(self, row: FileRow) -> None:

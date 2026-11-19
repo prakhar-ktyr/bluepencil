@@ -14,6 +14,7 @@ gi.require_version("Graphene", "1.0")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gdk, Gio, Graphene, Gtk  # noqa: E402
 
+from bluepencil.ui import combine_dialog  # noqa: E402
 from bluepencil.ui.combine_dialog import FileRow  # noqa: E402
 
 from .test_organize import drop_target_of  # noqa: E402
@@ -136,7 +137,7 @@ def test_more_files_can_be_added_from_another_folder(run_app, make_pdf, tmp_path
 def test_the_focused_file_moves_with_alt_and_the_arrow_keys_and_delete_removes_it(run_app, make_pdf, monkeypatch):
     paths = [str(make_pdf(f"{name}.pdf", pages=1)) for name in ("a", "b", "c")]
     said: list[str] = []
-    monkeypatch.setattr(FileRow, "announce", lambda _row, message, _priority: said.append(message))
+    monkeypatch.setattr(combine_dialog, "announce", lambda _row, message: said.append(message))
 
     def press(window, key: int, state: Gdk.ModifierType = Gdk.ModifierType.ALT_MASK) -> bool:
         return window.combine_dialog._on_key_pressed(None, key, 0, state)

@@ -13,6 +13,9 @@ import pytest
 # Desktop settings start from their defaults in tests, whatever the
 # developer's own desktop is set to. GLib reads this once, at first use.
 os.environ["GSETTINGS_BACKEND"] = "memory"
+# GTK's accessibility backend for when there is no accessibility bus, as in
+# CI: the same in every run, whatever the developer's desktop provides.
+os.environ["GTK_A11Y"] = "test"
 
 
 @pytest.fixture(autouse=True)
