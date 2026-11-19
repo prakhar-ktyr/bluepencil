@@ -62,6 +62,11 @@ parts:
   bluepencil:
     plugin: python
     source: .
+    build-environment:
+      # The GNOME extension puts the SDK's own pip and setuptools on
+      # PYTHONPATH, ahead of the part's: its pip 24.0 then breaks the newer
+      # pip that the part installs. Python treats an empty PYTHONPATH as none.
+      - PYTHONPATH: ""
 
   data:
     plugin: dump
