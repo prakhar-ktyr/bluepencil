@@ -5,8 +5,9 @@
 Each file shows its place in the order, its first page and its page count.
 Files are dragged into place, or moved from their menus, which also show the
 shortcuts, so that nothing depends on dragging: the reorderable lists of
-GNOME Settings work the same way. Add Files… can be used again and again, in
-any folder, and files can be dropped on the list from the Files app.
+GNOME Settings work the same way. The file the shortcuts move, the one
+clicked last, is tinted. Add Files… can be used again and again, in any
+folder, and files can be dropped on the list from the Files app.
 
 Files are read by an engine process of the list's own (plan, D1), one at a
 time: a file that crashes the PDF library is then known, and it cannot take
@@ -271,6 +272,7 @@ class CombineDialog(Adw.Dialog):
     def _build_files_page(self) -> Gtk.Widget:
         self.list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         self.list.add_css_class("boxed-list")
+        self.list.add_css_class("bp-combine-list")  # tints the focused file
         self.list.update_property([Gtk.AccessibleProperty.LABEL], [_("Files to combine, in order")])
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", weakly(self._on_key_pressed))
@@ -558,7 +560,7 @@ class CombineDialog(Adw.Dialog):
     def _on_key_pressed(
         self, _controller: Gtk.EventControllerKey, keyval: int, _keycode: int, state: Gdk.ModifierType
     ) -> bool:
-        # The file with the keyboard focus, shown by the focus ring.
+        # The file with the focus: tinted, and ringed once keys are used.
         row = self._focused_row()
         if row is None:
             return False

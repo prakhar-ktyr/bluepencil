@@ -26,6 +26,13 @@ _STYLES = """
   font-weight: bold;
 }
 
+/* The file that Alt and the arrow keys move: the one clicked last, or whose
+   menu is open. GTK rings the focus only once keys are used, so it is tinted
+   like a selected page in Organize mode. */
+list.bp-combine-list > row:focus-within {
+  background-color: alpha(@accent_bg_color, 0.25);
+}
+
 /* Where a dragged file will land. */
 row.bp-drop-before {
   box-shadow: inset 0 2px @accent_color;

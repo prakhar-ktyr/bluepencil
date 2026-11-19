@@ -10,8 +10,9 @@ import gi
 import pymupdf
 
 gi.require_version("Gdk", "4.0")
+gi.require_version("Graphene", "1.0")
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gdk, Gio, Gtk  # noqa: E402
+from gi.repository import Gdk, Gio, Graphene, Gtk  # noqa: E402
 
 from bluepencil.ui.combine_dialog import FileRow  # noqa: E402
 
@@ -62,6 +63,22 @@ def menu_items(row) -> dict[str, tuple[Gtk.Widget, str]]:
             label, *keys = [text.get_label() for text in descendants(widget) if isinstance(text, Gtk.Label)]
             items[label] = (widget, "".join(keys))
     return items
+
+
+def tint(row) -> int | None:
+    """How opaque the row's own background is, out of 255, just inside its
+    top edge: 0 when the list shows through untinted. None until drawn."""
+    width, height = row.get_width(), row.get_height()
+    snapshot = Gtk.Snapshot()
+    Gtk.WidgetPaintable.new(row).snapshot(snapshot, width, height)
+    node = snapshot.to_node()
+    if node is None:
+        return None
+    texture = row.get_native().get_renderer().render_texture(node, Graphene.Rect().init(0, 0, width, height))
+    downloader = Gdk.TextureDownloader.new(texture)
+    downloader.set_format(Gdk.MemoryFormat.R8G8B8A8)
+    pixels, stride = downloader.download_bytes()
+    return pixels.get_data()[3 * stride + width // 2 * 4 + 3]
 
 
 def widths(window) -> list[int]:
@@ -251,6 +268,45 @@ def test_the_pointer_shows_that_files_can_be_dragged_by_any_part(run_app, make_p
         assert row.get_cursor().get_name() == "grab"
 
     run_app(lambda window: window.show_combine_list([str(make_pdf())]), (all_read, check))
+
+
+def test_the_file_the_keys_would_move_is_tinted(run_app, make_pdf):
+    paths = [str(make_pdf(f"{name}.pdf", pages=1)) for name in ("a", "b")]
+    clearly = 32  # out of 255; the tint fades in to a quarter
+
+    def drawn(window) -> bool:
+        """the list read and drawn, no file tinted"""
+        return all_read(window) and all(tint(row) == 0 for row in window.combine_dialog.rows())
+
+    def click_first(window) -> None:
+        window.combine_dialog.rows()[0].grab_focus()  # as clicking it does
+
+    def first_tinted(window) -> bool:
+        """the first file to be tinted"""
+        return (tint(window.combine_dialog.rows()[0]) or 0) > clearly
+
+    def open_second_menu(window) -> None:
+        window.combine_dialog.rows()[1].menu_button.popup()
+
+    def tint_moved(window) -> bool:
+        """the tint to move to the file whose menu is open"""
+        first, second = window.combine_dialog.rows()
+        return tint(first) == 0 and (tint(second) or 0) > clearly
+
+    def click_combine_button(window) -> None:
+        window.combine_dialog.combine_button.grab_focus()
+
+    def none_tinted(window) -> bool:
+        """no file tinted once the focus leaves the list: the keys move none"""
+        return all(tint(row) == 0 for row in window.combine_dialog.rows())
+
+    run_app(
+        lambda window: window.show_combine_list(paths),
+        (drawn, click_first),
+        (first_tinted, open_second_menu),
+        (tint_moved, click_combine_button),
+        (none_tinted, lambda _window: None),
+    )
 
 
 def test_dragged_files_and_dropped_files_land_where_they_are_dropped(run_app, make_pdf, tmp_path):
