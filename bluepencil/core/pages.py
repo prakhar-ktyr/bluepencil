@@ -8,12 +8,12 @@ Bookmarks and links keep pointing at the same pages when pages move; links to
 deleted pages are removed.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import pymupdf
 
-from .document import KEEP_ENCRYPTION, OpenError, open_document
+from .document import DAMAGED, KEEP_ENCRYPTION, NO_PAGES, NOT_PDF, OpenError, open_document
 
 #: Largest page made from an image, in points: A4, either way round. Bigger
 #: images, such as phone photos, are scaled down to fit.
@@ -34,6 +34,9 @@ BAD_PAGES = "bad-pages"
 BAD_ANGLE = "bad-angle"
 NOT_AN_IMAGE = "not-an-image"
 UNSUPPORTED_FILE = "unsupported-file"
+
+#: Reasons a file is not read as a PDF, after which it is tried as a picture.
+NOT_READABLE_AS_PDF = (NOT_PDF, DAMAGED, NO_PAGES)
 
 
 def _checked(document: pymupdf.Document, pages: Sequence[int]) -> list[int]:
@@ -139,15 +142,24 @@ def insert_image(document: pymupdf.Document, path: str, at: int) -> list[int]:
     return [at]
 
 
-def insert_files(document: pymupdf.Document, paths: Sequence[str], at: int) -> list[int]:
-    """Insert PDFs and pictures, in this order, before page `at`."""
+def insert_files(
+    document: pymupdf.Document,
+    paths: Sequence[str],
+    at: int,
+    passwords: Mapping[str, str] | None = None,
+) -> list[int]:
+    """Insert PDFs and pictures, in this order, before page `at`.
+
+    `passwords` unlocks locked PDFs, by path. Their pages come in without the
+    password: it protects the file they came from, not the new document.
+    """
     position = _insertion_point(document, at)
     inserted: list[int] = []
     for path in paths:
         try:
-            added = insert_pdf(document, path, position)
+            added = insert_pdf(document, path, position, (passwords or {}).get(path))
         except OpenError as error:
-            if error.code not in ("not-pdf", "damaged"):
+            if error.code not in NOT_READABLE_AS_PDF:
                 raise
             try:
                 added = insert_image(document, path, position)

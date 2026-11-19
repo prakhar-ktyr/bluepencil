@@ -278,3 +278,15 @@ def test_insert_files_refuses_files_that_are_neither(document, tmp_path):
     with pytest.raises(PageError) as error:
         pages.insert_files(document, [str(tmp_path / "notes.txt")], 0)
     assert error.value.code == pages.UNSUPPORTED_FILE
+
+
+def test_insert_files_unlocks_locked_pdfs_and_leaves_their_password_behind(document, make_pdf, tmp_path):
+    locked = str(make_pdf("locked.pdf", pages=2, password="secret"))
+    with pytest.raises(OpenError) as error:
+        pages.insert_files(document, [locked], 0)
+    assert error.value.code == "needs-password"
+    assert pages.insert_files(document, [locked], 0, {locked: "secret"}) == [0, 1]
+    document.save(tmp_path / "result.pdf")
+    result = pymupdf.open(tmp_path / "result.pdf")
+    assert not result.needs_pass
+    assert labels(result)[:3] == ["Page 1", "Page 2", "Page 1"]

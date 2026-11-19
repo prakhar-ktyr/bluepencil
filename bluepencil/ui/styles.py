@@ -13,6 +13,31 @@ _STYLES = """
   background-color: white;
   box-shadow: 0 1px 3px alpha(black, 0.3), 0 0 0 1px alpha(black, 0.06);
 }
+
+/* The Combine list: each file's place in the order, on its picture. */
+.bp-order-number {
+  background-color: @accent_bg_color;
+  color: @accent_fg_color;
+  border-radius: 9999px;
+  /* The size of the number itself: a circle, wider only past two digits. */
+  min-width: 18px;
+  min-height: 18px;
+  padding: 0;
+  font-weight: bold;
+}
+
+/* Where a dragged file will land. */
+row.bp-drop-before {
+  box-shadow: inset 0 2px @accent_color;
+}
+
+row.bp-drop-after {
+  box-shadow: inset 0 -2px @accent_color;
+}
+
+row.bp-dragged {
+  opacity: 0.4;
+}
 """
 
 #: Displays that have the styles already.

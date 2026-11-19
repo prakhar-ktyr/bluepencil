@@ -23,8 +23,10 @@ from .engine_client import EngineClient  # noqa: E402
 from .history import History  # noqa: E402
 from .i18n import _  # noqa: E402
 from .recovery import Recoverable  # noqa: E402
+from .ui.combine_dialog import CombineDialog, files_filter  # noqa: E402
 from .ui.compress_dialog import CompressDialog  # noqa: E402
 from .ui.document_view import DocumentView, FitMode  # noqa: E402
+from .ui.names import display_folder  # noqa: E402
 from .ui.organize import OrganizeView  # noqa: E402
 from .ui.split_dialog import SplitDialog  # noqa: E402
 from .ui.thumbnails import ThumbnailSidebar  # noqa: E402
@@ -77,7 +79,7 @@ def _open_error_message(code: str | None) -> str:
         "no-pages": _("The file has no pages."),
         "engine-failed": _("Bluepencil’s PDF engine kept stopping while reading this file."),
         "unsupported-file": _("Only PDFs and pictures can be combined."),
-        "needs-password": _("One of the files is password-protected. Open it first, and extract its pages."),
+        "needs-password": _("One of the files is password-protected."),
     }
     return messages.get(code or "", _("Something went wrong while opening the file."))
 
@@ -90,7 +92,7 @@ def _edit_error_message(code: str | None) -> str:
         "disk-full": _("The disk is full. Free some space, or save the file somewhere else."),
         "check-failed": _("The saved file could not be read back, so the original was kept as it was."),
         "unsupported-file": _("Only PDFs and pictures can be added to a document."),
-        "needs-password": _("One of the files is password-protected. Open it first, and extract its pages."),
+        "needs-password": _("One of the files is password-protected. Combine Files can unlock it."),
         "damaged": _("One of the files is damaged."),
         "write-failed": _("The file could not be written. The original was kept as it was."),
     }
@@ -107,17 +109,6 @@ def _free_path(folder: Path, stem: str) -> Path:
     while path.exists():
         path, number = folder / f"{stem} ({number}).pdf", number + 1
     return path
-
-
-def _display_folder(path: str) -> str:
-    """The folder of `path`, with the home folder shown as ~."""
-    folder = Path(path).parent
-    home = Path.home()
-    if folder == home:
-        return "~"
-    if folder.is_relative_to(home):
-        return str(Path("~") / folder.relative_to(home))
-    return str(folder)
 
 
 class BluepencilWindow(Adw.ApplicationWindow):
@@ -160,6 +151,11 @@ class BluepencilWindow(Adw.ApplicationWindow):
         self.organize: OrganizeView | None = None
         #: The Compress dialog, while it is open.
         self.compress_dialog: CompressDialog | None = None
+        #: The Combine list, while it is open.
+        self.combine_dialog: CombineDialog | None = None
+        #: The files being combined here, and their passwords, until the
+        #: new document shows.
+        self._combining: tuple[list[str], dict[str, str]] | None = None
         self._actions: dict[str, Gio.SimpleAction] = {}
         #: Rows of the recent files list, with the path each one opens.
         self._recent_rows: list[tuple[str, Adw.ActionRow]] = []
@@ -206,7 +202,7 @@ class BluepencilWindow(Adw.ApplicationWindow):
         # library takes about a third of a second.
         GLib.idle_add(self._start_engine_early)
 
-        drop = Gtk.DropTarget.new(Gio.File, Gdk.DragAction.COPY)
+        drop = Gtk.DropTarget.new(Gdk.FileList, Gdk.DragAction.COPY)
         drop.connect("drop", weakly(self._on_drop))
         self.add_controller(drop)
         self.connect("close-request", self._on_close_request)
@@ -226,6 +222,8 @@ class BluepencilWindow(Adw.ApplicationWindow):
 
     def shutdown(self) -> None:
         """Stop the engine. Runs when the window closes or the app quits."""
+        if self.combine_dialog is not None:
+            self.combine_dialog.force_close()  # its engine stops with it
         self._remember_position()
         if self._history_handler:
             self._history.disconnect(self._history_handler)
@@ -266,29 +264,73 @@ class BluepencilWindow(Adw.ApplicationWindow):
             self._ensure_engine()
         return GLib.SOURCE_REMOVE
 
-    def combine_files(self, paths: list[str]) -> None:
-        """Make a new document from these PDFs and pictures, in this order."""
+    def combine_files(self, paths: list[str], passwords: dict[str, str] | None = None) -> None:
+        """Make a new document from these PDFs and pictures, in this order.
+        `passwords` unlocks locked PDFs, by path."""
         if not paths:
             return
+        self._restarts = []
+        self._combine(paths, passwords or {})
+
+    def _combine(self, paths: list[str], passwords: dict[str, str]) -> None:
         target = _free_path(Path(paths[0]).parent, _("Combined"))
         file = Gio.File.new_for_path(str(target))
-        self._restarts = []
+        self._combining = (paths, passwords)
         self._loading = file
         self._loading_password = None
         self._ensure_engine().request(
-            {"op": "combine", "paths": paths, "path": str(target)},
-            functools.partial(self._on_opened, file, None),
+            {"op": "combine", "paths": paths, "path": str(target), "passwords": passwords},
+            functools.partial(self._on_combined, file),
             key=("open",),
             priority=OPEN_PRIORITY,
         )
         GLib.timeout_add(LOADING_DELAY_MS, self._show_loading, file)
 
+    def _on_combined(self, file: Gio.File, reply: dict, _payload: bytes) -> None:
+        if file is not self._loading:
+            return  # another file was asked for in the meantime
+        self._loading = None
+        self._combining = None
+        if reply.get("ok"):
+            self._show_document(file, None, reply)
+        else:
+            self._show_combine_error(reply.get("error"))
+
+    def _show_combine_error(self, code: str | None) -> None:
+        self._close_document()
+        message = _open_error_message(code)
+        self._show_status("dialog-warning-symbolic", _("Can’t Combine the Files"), message, show_button=True)
+
+    def show_combine_list(self, paths: list[str]) -> CombineDialog:
+        """Show files in the Combine list, to put in order and add to before
+        combining. Files join the list if it is open already."""
+        if self.combine_dialog is not None:
+            self.combine_dialog.add_files(paths)
+            return self.combine_dialog
+        dialog = CombineDialog(paths)
+        dialog.connect("combine-requested", weakly(self._on_combine_requested))
+        dialog.connect("closed", weakly(self._on_combine_dialog_closed))
+        self.combine_dialog = dialog
+        dialog.present(self)
+        dialog.set_focus(dialog.combine_button)  # Enter combines, when the order is right
+        return dialog
+
+    def _on_combine_requested(self, dialog: CombineDialog, paths: list[str], passwords: dict[str, str]) -> None:
+        dialog.close()
+        if self.is_empty:
+            self.combine_files(paths, passwords)
+        else:
+            window = type(self)(application=self.get_application())
+            window.present()
+            window.combine_files(paths, passwords)
+
+    def _on_combine_dialog_closed(self, dialog: CombineDialog) -> None:
+        if self.combine_dialog is dialog:
+            self.combine_dialog = None
+
     def _on_combine_clicked(self, *_args: object) -> None:
-        accepted = Gtk.FileFilter(name=_("PDFs and pictures"))
-        accepted.add_mime_type("application/pdf")
-        accepted.add_pixbuf_formats()
         filters = Gio.ListStore.new(Gtk.FileFilter)
-        filters.append(accepted)
+        filters.append(files_filter())
         dialog = Gtk.FileDialog(title=_("Combine Files"), modal=True, filters=filters)
         dialog.open_multiple(self, None, weakly(self._on_combine_chosen))
 
@@ -297,15 +339,9 @@ class BluepencilWindow(Adw.ApplicationWindow):
             files = dialog.open_multiple_finish(result)
         except GLib.Error:
             return  # closed without choosing
-        paths = [file.get_path() for file in files if file.get_path() is not None]
-        if not paths:
-            return
-        if self.is_empty:
-            self.combine_files(paths)
-        else:
-            window = type(self)(application=self.get_application())
-            window.present()
-            window.combine_files(paths)
+        paths = [path for file in files if (path := file.get_path()) is not None]
+        if paths:
+            self.show_combine_list(paths)
 
     def _ensure_engine(self) -> EngineClient:
         if self._engine is None:
@@ -505,7 +541,7 @@ class BluepencilWindow(Adw.ApplicationWindow):
             # use_markup off: a file name is shown as it is, "&" and all.
             row = Adw.ActionRow(
                 title=name,
-                subtitle=_display_folder(entry.path),
+                subtitle=display_folder(entry.path),
                 use_markup=False,
                 activatable=True,
                 title_lines=1,
@@ -545,9 +581,16 @@ class BluepencilWindow(Adw.ApplicationWindow):
         self._restarts = [t for t in self._restarts if now - t < RESTART_PERIOD] + [now]
         if len(self._restarts) > MAX_RESTARTS:
             self._loading = None
-            self._show_error(file, "engine-failed")
+            if self.current_file is None and self._combining is not None:
+                self._combining = None
+                self._show_combine_error("engine-failed")
+            else:
+                self._show_error(file, "engine-failed")
             return
         self._toast(_("The PDF engine stopped unexpectedly and was restarted"))
+        if self.current_file is None and self._combining is not None:
+            self._combine(*self._combining)
+            return
         if self.current_file is None:
             self._load(file, self._loading_password)
             return
@@ -1284,10 +1327,17 @@ class BluepencilWindow(Adw.ApplicationWindow):
             self.view.set_zoom(parameter.get_int32() / 100)
 
     def _on_drop(self, _target: Gtk.DropTarget, value: object, _x: float, _y: float) -> bool:
-        if not isinstance(value, Gio.File):
+        """One file opens; several go to the Combine list."""
+        if not isinstance(value, Gdk.FileList):
             return False
-        self.get_application().open_file(value, self)
-        return True
+        files = value.get_files()
+        if len(files) == 1 and self.combine_dialog is None:
+            self.get_application().open_file(files[0], self)
+            return True
+        paths = [path for file in files if (path := file.get_path()) is not None]
+        if paths:
+            self.show_combine_list(paths)
+        return bool(paths)
 
     def _on_close_request(self, _window: Gtk.Window) -> bool:
         if self._state.get("modified") and not self._discard_confirmed:

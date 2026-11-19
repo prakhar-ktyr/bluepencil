@@ -113,3 +113,25 @@ def test_snapshots_stay_if_the_interface_goes_away(make_pdf):
     assert manifest["path"] == str(path)
     assert (manifest["position"], manifest["saved_position"]) == (1, 0)
     assert all((folder / name).exists() for name in manifest["files"])
+
+
+def test_inspects_files_without_touching_the_open_document(engine, make_pdf, tmp_path):
+    ask(engine, {"op": "open", "path": str(make_pdf(pages=3)), "id": 1})
+    locked = str(make_pdf("locked.pdf", pages=2, password="secret"))
+    reply, pixels = ask(engine, {"op": "inspect", "path": locked, "password": "secret", "size": 64, "id": 2})
+    assert reply["ok"] and reply["pages"] == 2 and reply["height"] == 64
+    assert len(pixels) == reply["stride"] * reply["height"]
+    reply, _ = ask(engine, {"op": "inspect", "path": locked, "id": 3})
+    assert reply["error"] == "needs-password"
+    reply, _ = ask(engine, {"op": "render", "page": 2, "scale": 0.1, "id": 4})
+    assert reply["ok"]  # the open document is still there
+
+
+def test_combines_locked_files_with_their_passwords(engine, make_pdf, tmp_path):
+    locked = str(make_pdf("locked.pdf", pages=2, password="secret"))
+    plain = str(make_pdf("plain.pdf", pages=1))
+    request = {"op": "combine", "paths": [plain, locked], "path": str(tmp_path / "Combined.pdf")}
+    reply, _ = ask(engine, {**request, "id": 1})
+    assert reply["error"] == "needs-password"
+    reply, _ = ask(engine, {**request, "passwords": {locked: "secret"}, "id": 2})
+    assert reply["ok"] and reply["page_count"] == 3 and reply["untitled"]

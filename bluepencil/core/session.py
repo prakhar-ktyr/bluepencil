@@ -68,14 +68,15 @@ class Session:
         self.untitled = False
 
     @classmethod
-    def combine(cls, paths: list[str], target: str) -> "Session":
+    def combine(cls, paths: list[str], target: str, passwords: dict[str, str] | None = None) -> "Session":
         """A new document made of these PDFs and pictures, in this order.
 
         It has no file yet; `target` is only the suggested place to save it.
+        `passwords` unlocks locked PDFs, by path.
         """
         document = pymupdf.open()
         try:
-            pages.insert_files(document, paths, 0)
+            pages.insert_files(document, paths, 0, passwords)
         except Exception:
             document.close()
             raise

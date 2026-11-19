@@ -7,10 +7,11 @@ will have, how it is built, and the order of work. Tick the checkboxes as work
 lands, and change the plan when reality disagrees with it.
 
 **Where things stand:** Milestones 1 (viewer), 2 (organize pages) and 3
-(compress) are built, with 182 tests, and Milestone 4 (package) has its
+(compress) are built, with 208 tests, and Milestone 4 (package) has its
 icon, desktop file, store metadata and a first snap recipe. Bluepencil opens, shows and remembers PDFs; rotates,
 deletes, duplicates, moves, inserts, extracts and splits pages, alone or many
-at once in Organize mode; combines files; undoes and redoes every change;
+at once in Organize mode; combines files from any folders, put in order
+first and unlocked if locked; undoes and redoes every change;
 saves safely; keeps unsaved changes through an engine crash or a crash of
 the whole app; and compresses to a smaller copy with four presets. Left in these milestones: checks by hand on a real desktop
 (scrolling, memory, dragging pages, files opened in other apps after saving).
@@ -576,8 +577,17 @@ Interface
       deletes them, Ctrl+[ and Ctrl+] rotate them
 - [x] Drop PDF or image files onto the grid to insert them at that position,
       as one step that undo takes back
-- [x] "Combine files" on the start page: pick PDFs and pictures, put the pages
-      in order in the grid, then Save asks where the new document goes
+- [x] "Combine files" on the start page: pick PDFs and pictures, put the files
+      in order in the Combine list, then the pages in the grid; Save asks
+      where the new document goes
+- [x] The Combine list numbers the files in their order and shows each one's
+      first page and page count. Files move by dragging or with Alt and the
+      arrow keys; Add Files… and dropping from the Files app bring in files
+      from any folder; files that cannot be combined say why, and locked PDFs
+      are unlocked there (the new PDF has no password). Dropping several
+      files on the window opens it. Files are read in an engine process of
+      the list's own, one at a time, so a file that crashes the PDF library
+      is named and cannot take an open document with it
 - [x] Split dialog: every N pages, or ranges typed as "1-3, 4-10, 11-",
       checked as they are typed; the parts go to a chosen folder
 - [x] Unsaved-changes marker, and Save / Discard / Cancel on close (also on

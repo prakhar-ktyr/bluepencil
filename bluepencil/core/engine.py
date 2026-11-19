@@ -17,7 +17,7 @@ from typing import IO
 
 import pymupdf
 
-from . import pages, protocol
+from . import pages, preview, protocol
 from .document import OpenError
 from .memory import release_memory_promptly
 from .pages import PageError
@@ -62,7 +62,13 @@ class Engine:
 
     def handle(self, request: dict) -> tuple[dict, bytes]:
         op = str(request.get("op"))
-        starts = {"open": self._open, "combine": self._combine, "ping": lambda _request: ({"ok": True}, b"")}
+        # Requests that need no open document.
+        starts = {
+            "open": self._open,
+            "combine": self._combine,
+            "inspect": self._inspect,
+            "ping": lambda _request: ({"ok": True}, b""),
+        }
         if op in starts:
             return starts[op](request)
         handler = self._handlers.get(op)
@@ -115,10 +121,19 @@ class Engine:
         """Make a new document from several files."""
         self.close()
         try:
-            self.session = Session.combine(request["paths"], request["path"])
+            self.session = Session.combine(request["paths"], request["path"], request.get("passwords"))
         except (OpenError, PageError) as error:
             return _failure(error)
         return {"ok": True, **self.session.state()}, b""
+
+    def _inspect(self, request: dict) -> tuple[dict, bytes]:
+        """Describe a file to combine, with a small picture of its first page.
+        Any open document stays as it is."""
+        try:
+            info, pixels = preview.inspect(request["path"], request.get("password"), request.get("size", 96))
+        except (OpenError, PageError) as error:
+            return _failure(error)
+        return {"ok": True, **info}, pixels
 
     def _open(self, request: dict) -> tuple[dict, bytes]:
         """Open a file, or carry on from the snapshots of an engine that stopped."""
