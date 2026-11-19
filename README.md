@@ -5,6 +5,8 @@
 A PDF app for Ubuntu and other Linux desktops: view, edit, sign, organize and
 convert PDFs in one window, with every file staying on your computer.
 
+![Bluepencil showing a PDF, with its pages in the sidebar](docs/screenshots/read.png)
+
 **Status: early development.** Bluepencil opens PDFs, including
 password-protected ones, and shows their pages with zoom, page navigation and
 a thumbnail sidebar. It lists recent files and reopens each one where you

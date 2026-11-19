@@ -41,6 +41,16 @@ def test_the_store_description_names_the_app_its_launcher_and_licence():
     assert root.findtext("project_license") == "AGPL-3.0-or-later"
 
 
+def test_the_store_screenshots_are_in_the_repository():
+    # The stores fetch them from GitHub, so a renamed file breaks the listing.
+    address = "https://raw.githubusercontent.com/prakhar-ktyr/bluepencil/main/"
+    images = [image.text or "" for image in ET.parse(METAINFO).getroot().iter("image")]
+    assert len(images) >= 3
+    for image in images:
+        assert image.startswith(address)
+        assert (ROOT / image.removeprefix(address)).is_file(), image
+
+
 @pytest.mark.skipif(shutil.which("appstreamcli") is None, reason="appstream is not installed")
 def test_the_store_description_is_valid():
     result = subprocess.run(

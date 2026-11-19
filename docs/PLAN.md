@@ -7,8 +7,8 @@ will have, how it is built, and the order of work. Tick the checkboxes as work
 lands, and change the plan when reality disagrees with it.
 
 **Where things stand:** Milestones 1 (viewer), 2 (organize pages) and 3
-(compress) are built, with 216 tests. Milestone 4 (package) has its icon,
-desktop file and store metadata, the name `bluepencil` reserved in the Snap
+(compress) are built, with 217 tests. Milestone 4 (package) has its icon,
+desktop file, store metadata and screenshots, the name `bluepencil` reserved in the Snap
 Store, a snap recipe, and a CI workflow that builds the snap and opens a PDF
 in it; the recipe and the workflow have not run yet. Bluepencil opens, shows and remembers PDFs; rotates,
 deletes, duplicates, moves, inserts, extracts and splits pages, alone or many
@@ -649,7 +649,12 @@ no test or manual check can make the app lose or corrupt a file.
 - [ ] CI publishes to the `edge` channel. Needs a store login saved as a
       GitHub secret (`snapcraft export-login`), after the first upload by hand
 - [ ] Store listing: summary, description, 3–5 screenshots, links, licence,
-      category
+      category. Summary, description, links and licence are in the snap
+      recipe. Four screenshots (reading, Organize, Combine, Compress; light
+      style, invented sample files, 1980 × 1500) are in `docs/screenshots/`
+      and listed in the store metadata. Left for the account owner, on the
+      snap's Listing page at snapcraft.io: upload the screenshots and pick
+      the category (Productivity)
 - [ ] Tag `v0.1.0`, promote to `stable`, write the changelog
 
 To try the snap that CI built (about 10 minutes, no LXD needed):
