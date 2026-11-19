@@ -69,6 +69,26 @@ def test_a_change_marks_the_file_unsaved_and_undo_and_redo_work(run_app, make_pd
     )
 
 
+def test_a_replaced_view_no_longer_sets_the_zoom_or_the_page_number(run_app, make_pdf):
+    # Each change brings a new view. The old one can still finish work it had
+    # queued, such as fitting its pages to a new size, and say so.
+    views = []
+
+    def rotate_keeping_the_view(window) -> None:
+        views.append(window.view)
+        rotate(window)
+
+    def check(window) -> None:
+        old = views[0]
+        assert window.view is not old
+        old.set_zoom(3.0)
+        old.emit("current-page-changed", 2)
+        assert window._zoom_button.get_label() == f"{round(window.view.zoom * 100)}%"
+        assert window._page_entry.get_text() == "1"
+
+    run_app((loaded, rotate_keeping_the_view), (unsaved, check), argv=[make_pdf()])
+
+
 def test_save_writes_the_change_to_the_file(run_app, make_pdf):
     path = make_pdf()
 

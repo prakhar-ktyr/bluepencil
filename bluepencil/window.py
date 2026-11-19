@@ -386,8 +386,8 @@ class BluepencilWindow(Adw.ApplicationWindow):
             self._history.opened(path)
         view.connect("current-page-changed", weakly(self._on_current_page_changed))
         view.connect("zoom-changed", weakly(self._on_zoom_changed))
-        self._on_zoom_changed(view)
         self.view = view
+        self._show_zoom()
         self.current_file = file
         self._password = password
         self._page_sizes = info["pages"]
@@ -693,10 +693,10 @@ class BluepencilWindow(Adw.ApplicationWindow):
         view = DocumentView(engine, state["pages"], zoom=zoom, fit=fit, page=page, size_hint=size)
         view.connect("current-page-changed", weakly(self._on_current_page_changed))
         view.connect("zoom-changed", weakly(self._on_zoom_changed))
+        self.view = view
         # A new view starts at its own zoom, fitted to its new pages, before
         # it says so: show that zoom now, not after the next layout.
-        self._on_zoom_changed(view)
-        self.view = view
+        self._show_zoom()
         self._state = state
         self._page_sizes = state["pages"]
         self._split.set_content(view)
@@ -1286,7 +1286,9 @@ class BluepencilWindow(Adw.ApplicationWindow):
         entry.set_text(str(number))
         self.view.focus_pages()
 
-    def _on_current_page_changed(self, _view: DocumentView, index: int) -> None:
+    def _on_current_page_changed(self, view: DocumentView, index: int) -> None:
+        if view is not self.view:
+            return  # replaced after a change, finishing work it had queued
         focus = self.get_focus()
         if focus is None or not focus.is_ancestor(self._page_entry):
             self._page_entry.set_text(str(index + 1))
@@ -1323,8 +1325,14 @@ class BluepencilWindow(Adw.ApplicationWindow):
         return GLib.SOURCE_REMOVE
 
     def _on_zoom_changed(self, view: DocumentView) -> None:
-        self._zoom_button.set_label(_("{percent}%").format(percent=round(view.zoom * 100)))
+        if view is not self.view:
+            return  # replaced after a change, finishing work it had queued
+        self._show_zoom()
         self._remember_position()
+
+    def _show_zoom(self) -> None:
+        if self.view is not None:
+            self._zoom_button.set_label(_("{percent}%").format(percent=round(self.view.zoom * 100)))
 
     def _on_zoom_percent(self, _action: Gio.SimpleAction, parameter: GLib.Variant) -> None:
         if self.view is not None:
