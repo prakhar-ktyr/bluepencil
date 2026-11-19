@@ -35,3 +35,12 @@ def test_about_window_shows_the_licence(run_app) -> None:
         assert about.get_application_name() == APP_NAME
 
     run_app(check)
+
+
+def test_the_app_finds_its_own_icon(run_app) -> None:
+    def check(window) -> None:
+        theme = Gtk.IconTheme.get_for_display(window.get_display())
+        assert theme.has_icon(APP_ID)
+        assert Gtk.Window.get_default_icon_name() == APP_ID
+
+    run_app(check)

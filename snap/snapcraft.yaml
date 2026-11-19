@@ -1,0 +1,69 @@
+# SPDX-FileCopyrightText: 2026 Prakhar Katiyar
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# First draft, not built yet: building needs snapcraft, which is not on the
+# development machine. See docs/PLAN.md, Milestone 4, for the steps.
+#
+# Plan D6: strictly confined, with access to the home folder and removable
+# drives only, and no network access at all.
+
+name: bluepencil
+title: Bluepencil
+base: core24
+version: '0.1.0'
+summary: Read, organize and compress PDFs, fully offline
+description: |
+  Bluepencil does in one window what usually takes several apps and an
+  upload website. Everything happens on your computer: the app has no
+  network access at all, so your documents never leave it.
+
+  - Read PDFs with zoom, page thumbnails and a list of recent files
+  - Rotate, delete, duplicate, move and insert pages, one or many at once
+  - Combine PDFs and pictures into one document, or split one into parts
+  - Compress a PDF into a smaller copy, with the real size shown first
+  - Undo every change: nothing is written until you save
+grade: devel
+confinement: strict
+license: AGPL-3.0-or-later
+icon: data/icons/hicolor/scalable/apps/io.github.prakhar_ktyr.Bluepencil.svg
+website: https://github.com/prakhar-ktyr/bluepencil
+source-code: https://github.com/prakhar-ktyr/bluepencil
+issues: https://github.com/prakhar-ktyr/bluepencil/issues
+
+platforms:
+  amd64:
+  arm64:
+
+apps:
+  bluepencil:
+    command: bin/bluepencil
+    extensions: [gnome]
+    desktop: usr/share/applications/io.github.prakhar_ktyr.Bluepencil.desktop
+    common-id: io.github.prakhar_ktyr.Bluepencil
+    plugs:
+      - home
+      - removable-media
+    environment:
+      # PyGObject comes from the Ubuntu archive (python3-gi, below); GTK and
+      # libadwaita come from the GNOME runtime that the extension connects.
+      PYTHONPATH: $SNAP/usr/lib/python3/dist-packages
+
+parts:
+  bluepencil:
+    plugin: python
+    source: .
+    stage-packages:
+      - python3-gi
+
+  data:
+    plugin: dump
+    source: data
+    organize:
+      io.github.prakhar_ktyr.Bluepencil.desktop: usr/share/applications/io.github.prakhar_ktyr.Bluepencil.desktop
+      io.github.prakhar_ktyr.Bluepencil.metainfo.xml: usr/share/metainfo/io.github.prakhar_ktyr.Bluepencil.metainfo.xml
+      icons: usr/share/icons
+    override-prime: |
+      craftctl default
+      # Inside a snap the icon is found by its path; snapd fills in ${SNAP}.
+      sed -i 's|^Icon=.*|Icon=${SNAP}/usr/share/icons/hicolor/scalable/apps/io.github.prakhar_ktyr.Bluepencil.svg|' \
+        usr/share/applications/io.github.prakhar_ktyr.Bluepencil.desktop

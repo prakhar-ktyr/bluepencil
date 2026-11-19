@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-FileCopyrightText: 2026 Prakhar Katiyar -->
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<component type="desktop-application">
+  <id>io.github.prakhar_ktyr.Bluepencil</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>AGPL-3.0-or-later</project_license>
+  <name>Bluepencil</name>
+  <summary>Read, organize and compress PDFs</summary>
+  <description>
+    <p>
+      Bluepencil does in one window what usually takes several apps and an
+      upload website. Everything happens on your computer: the app has no
+      network access at all, so your documents never leave it.
+    </p>
+    <ul>
+      <li>Read PDFs with zoom, page thumbnails and a list of recent files</li>
+      <li>Rotate, delete, duplicate, move and insert pages, one or many at once</li>
+      <li>Combine PDFs and pictures into one document, or split one into parts</li>
+      <li>Compress a PDF into a smaller copy, with the real size shown first</li>
+      <li>Undo every change: nothing is written until you save</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.prakhar_ktyr.Bluepencil.desktop</launchable>
+  <developer id="io.github.prakhar_ktyr">
+    <name>Prakhar Katiyar</name>
+  </developer>
+  <url type="homepage">https://github.com/prakhar-ktyr/bluepencil</url>
+  <url type="bugtracker">https://github.com/prakhar-ktyr/bluepencil/issues</url>
+  <url type="vcs-browser">https://github.com/prakhar-ktyr/bluepencil</url>
+  <content_rating type="oars-1.1"/>
+  <provides>
+    <binary>bluepencil</binary>
+  </provides>
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+    <control>touch</control>
+  </supports>
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+  <branding>
+    <color type="primary" scheme_preference="light">#99c1f1</color>
+    <color type="primary" scheme_preference="dark">#1a5fb4</color>
+  </branding>
+  <categories>
+    <category>Office</category>
+    <category>Viewer</category>
+  </categories>
+  <keywords>
+    <keyword>PDF</keyword>
+    <keyword>merge</keyword>
+    <keyword>split</keyword>
+    <keyword>compress</keyword>
+  </keywords>
+</component>

@@ -3,12 +3,14 @@
 """The application object: windows, app-wide actions and shortcuts."""
 
 from collections.abc import Callable
+from pathlib import Path
 
 import gi
 
 gi.require_version("Adw", "1")
+gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
-from gi.repository import Adw, Gio, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, Gtk  # noqa: E402
 
 from . import APP_ID, APP_NAME, APP_SUMMARY, COPYRIGHT, VERSION  # noqa: E402
 from .core.memory import release_memory_promptly  # noqa: E402
@@ -36,6 +38,15 @@ _SHORTCUTS = {
 }
 
 
+def _find_own_icons() -> None:
+    """Let GTK find the app's icons when it runs from its source folder.
+    Installed copies, such as the snap, put them where GTK looks anyway."""
+    icons = Path(__file__).resolve().parent.parent / "data" / "icons"
+    display = Gdk.Display.get_default()
+    if icons.is_dir() and display is not None:
+        Gtk.IconTheme.get_for_display(display).add_search_path(str(icons))
+
+
 def build_about_dialog() -> Adw.AboutDialog:
     """The About window.
 
@@ -44,7 +55,7 @@ def build_about_dialog() -> Adw.AboutDialog:
     """
     return Adw.AboutDialog(
         application_name=APP_NAME,
-        application_icon="x-office-document",
+        application_icon=APP_ID,
         version=VERSION,
         comments=_(APP_SUMMARY),
         copyright=COPYRIGHT,
@@ -70,6 +81,8 @@ class BluepencilApplication(Adw.Application):
     def do_startup(self) -> None:
         Adw.Application.do_startup(self)
         load_styles()
+        _find_own_icons()
+        Gtk.Window.set_default_icon_name(APP_ID)
 
     def do_activate(self) -> None:
         window = self.props.active_window or BluepencilWindow(application=self)

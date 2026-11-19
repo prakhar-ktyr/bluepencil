@@ -44,6 +44,12 @@ which otherwise crash GTK 4 apps at startup.
 
 The tests run on a hidden display (`xvfb`), so no windows appear on screen.
 
+## Packaging
+
+`data/` holds the icon, the desktop file and the store metadata, and
+`snap/snapcraft.yaml` the snap recipe; the steps to build the snap are in the
+plan, Milestone 4.
+
 ## Plan
 
 The full plan (features, design, milestones and decisions) is in

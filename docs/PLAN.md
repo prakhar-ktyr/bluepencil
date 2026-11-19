@@ -7,15 +7,16 @@ will have, how it is built, and the order of work. Tick the checkboxes as work
 lands, and change the plan when reality disagrees with it.
 
 **Where things stand:** Milestones 1 (viewer), 2 (organize pages) and 3
-(compress) are built, with 174 tests. Bluepencil opens, shows and remembers PDFs; rotates,
+(compress) are built, with 182 tests, and Milestone 4 (package) has its
+icon, desktop file, store metadata and a first snap recipe. Bluepencil opens, shows and remembers PDFs; rotates,
 deletes, duplicates, moves, inserts, extracts and splits pages, alone or many
 at once in Organize mode; combines files; undoes and redoes every change;
 saves safely; keeps unsaved changes through an engine crash or a crash of
 the whole app; and compresses to a smaller copy with four presets. Left in these milestones: checks by hand on a real desktop
 (scrolling, memory, dragging pages, files opened in other apps after saving).
-**Next action:** try it by hand (`./dev`), then Milestone 4: package and
-publish 0.1. It needs the Snap Store name reserved first (only the owner of
-the Ubuntu One account can do that).
+**Next action:** try it by hand (`./dev`), then build the snap with the
+steps in Milestone 4. Publishing needs the Snap Store name reserved first
+(only the owner of the Ubuntu One account can do that).
 
 ## Contents
 
@@ -610,10 +611,14 @@ no test or manual check can make the app lose or corrupt a file.
 
 ### Milestone 4: Package and publish 0.1 (1 weekend, plus store review)
 
-- [ ] App icon (SVG), desktop file that registers Bluepencil for PDF files,
-      store metadata file
+- [x] App icon (SVG, plus a symbolic one), desktop file that registers
+      Bluepencil for PDF files, store metadata file (`data/`); checked by
+      `desktop-file-validate` and `appstreamcli validate` in the tests
 - [ ] `snap/snapcraft.yaml`: `core24`, GNOME extension, strict confinement,
-      `home` and `removable-media`, no `network`
+      `home` and `removable-media`, no `network`. **Drafted, not built yet:**
+      snapcraft is not installed here. PyGObject comes from `python3-gi` in
+      the Ubuntu archive; that is the part most likely to need a fix after
+      the first build.
 - [ ] Install the built snap and run the manual checklist: open and save inside
       the home folder, open a file from outside it through the file picker,
       drag and drop, dark mode, HiDPI, Wayland and X11
@@ -622,6 +627,18 @@ no test or manual check can make the app lose or corrupt a file.
 - [ ] Store listing: summary, description, 3–5 screenshots, links, licence,
       category
 - [ ] Tag `v0.1.0`, promote to `stable`, write the changelog
+
+To build and try the snap (about 30 minutes the first time, mostly
+downloads):
+
+```
+sudo snap install snapcraft --classic
+sudo snap install lxd && sudo lxd init --auto   # snapcraft builds inside LXD
+sudo usermod -aG lxd "$USER"                    # then log out and back in
+snapcraft pack                                  # in the Bluepencil folder
+sudo snap install --dangerous ./bluepencil_0.1.0_amd64.snap
+snap run bluepencil
+```
 
 Packaging comes this early on purpose. The sandbox is where surprises hide
 (file access, drag and drop, starting the engine process, printing), and

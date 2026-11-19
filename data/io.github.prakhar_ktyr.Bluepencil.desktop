@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: 2026 Prakhar Katiyar
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[Desktop Entry]
+Type=Application
+Name=Bluepencil
+GenericName=PDF Editor
+Comment=Read, organize and compress PDFs, fully offline
+Keywords=pdf;document;pages;merge;combine;split;compress;rotate;organize;
+Exec=bluepencil %U
+Icon=io.github.prakhar_ktyr.Bluepencil
+Terminal=false
+Categories=Office;Viewer;
+MimeType=application/pdf;
+StartupNotify=true
