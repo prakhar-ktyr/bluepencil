@@ -9,17 +9,18 @@ lands, and change the plan when reality disagrees with it.
 **Where things stand:** Milestones 1 (viewer), 2 (organize pages) and 3
 (compress) are built, with 218 tests. Milestone 4 (package) has its icon,
 desktop file, store metadata and screenshots, the name `bluepencil` reserved in the Snap
-Store, a snap recipe, and a CI workflow that builds the snap and opens a PDF
-in it; the recipe and the workflow have not run yet. Bluepencil opens, shows and remembers PDFs; rotates,
+Store, and a snap that CI builds for amd64 and arm64 (28.9 MB) and opens a
+PDF in, green since 19 November 2026; the tests pass in CI on Ubuntu 24.04
+and 26.04. Bluepencil opens, shows and remembers PDFs; rotates,
 deletes, duplicates, moves, inserts, extracts and splits pages, alone or many
 at once in Organize mode; combines files from any folders, put in order
 first and unlocked if locked; undoes and redoes every change;
 saves safely; keeps unsaved changes through an engine crash or a crash of
 the whole app; and compresses to a smaller copy with four presets. Left in these milestones: checks by hand on a real desktop
 (scrolling, memory, dragging pages, files opened in other apps after saving).
-**Next action:** push, so that CI builds the snap; install the snap it
-built and run the checklist in Milestone 4; then upload it to `edge` and ask
-for the one-time review of its D-Bus slot (section 8).
+**Next action:** install the snap that CI built and run the checklist in
+Milestone 4; then upload it to `edge` and ask for the one-time review of its
+D-Bus slot (section 8).
 
 ## Contents
 
@@ -461,10 +462,11 @@ release. Anything risky gets a small experiment before its milestone starts.
       agreement (for example the free CLA Assistant app on GitHub)
 - [x] Reserve the name `bluepencil` on the Snap Store (19 November 2026)
 - [x] Decision 6: compatibility floor raised to Ubuntu 24.04 (18 November 2026)
-- [ ] CI: run the tests on every push, on Ubuntu 24.04 and 26.04. The
-      workflow is written (`.github/workflows/tests.yml`: each version in its
-      own container, `./dev check` then `./dev test`) and passes actionlint;
-      tick this once its first run on GitHub is green
+- [x] CI: run the tests on every push, on Ubuntu 24.04 and 26.04
+      (`.github/workflows/tests.yml`: each version in its own container,
+      `./dev check` then `./dev test`). Green since 19 November 2026; its
+      first run found a crash on 24.04 and a PyGObject change on 26.04
+      (section 9)
 - [x] `./dev check` for lint and type checks (ruff and mypy, exact versions),
       plus tests that every source file has its licence lines and that
       `core/` and the interface keep to their sides (rule 2 in section 11)
@@ -630,22 +632,22 @@ no test or manual check can make the app lose or corrupt a file.
 - [x] App icon (SVG, plus a symbolic one), desktop file that registers
       Bluepencil for PDF files, store metadata file (`data/`); checked by
       `desktop-file-validate` and `appstreamcli validate` in the tests
-- [ ] `snap/snapcraft.yaml`: `core24`, GNOME extension, strict confinement,
+- [x] `snap/snapcraft.yaml`: `core24`, GNOME extension, strict confinement,
       `home` and `removable-media`, no `network`. Python, PyGObject, GTK and
       libadwaita come from the GNOME runtime (`gnome-46-2404`: GTK 4.18,
       PyGObject 3.54), which also puts PyGObject on the path. A `dbus` slot
       lets GTK register the app ID on the session bus: a confined app may own
       only the names it declares, and without this one it would quit at
-      start. Checked with `snapcraft expand-extensions`; not built yet
-      (building needs LXD here, or CI). Tick once it builds
+      start. The extension's build PYTHONPATH is cleared for the Python
+      part: the SDK's own pip 24.0 broke the part's newer pip. Builds in CI
+      since 19 November 2026
 - [ ] Install the built snap and run the manual checklist: open and save inside
       the home folder, open a file from outside it through the file picker,
       drag and drop, dark mode, HiDPI, Wayland and X11
-- [ ] CI builds the snap for amd64 and arm64 on every push to `main`, then
-      installs the amd64 snap and opens a PDF in it on a hidden display,
-      keeping a screenshot and the log (`.github/workflows/snap.yml`; passes
-      actionlint, and its PDF step was rehearsed with the development copy).
-      Tick once its first run is green
+- [x] CI builds the snap for amd64 and arm64 on every push to `main`, then
+      installs the amd64 snap, opens a PDF in it on a hidden display, checks
+      that the app owns its ID on the session bus, and keeps a screenshot and
+      the log (`.github/workflows/snap.yml`). Green since 19 November 2026
 - [ ] CI publishes to the `edge` channel. Needs a store login saved as a
       GitHub secret (`snapcraft export-login`), after the first upload by hand
 - [ ] Store listing: summary, description, 3–5 screenshots, links, licence,
@@ -894,6 +896,7 @@ file, submitted as a pull request on GitHub and reviewed by volunteers.
 | Two GTK versions: 4.14 on the development machine, 4.18 in the store build. | The compatibility floor (D8) and CI on both. |
 | A new engine version changes behaviour. | Pin the exact version; upgrade deliberately, with the whole test suite. |
 | Python's garbage collector cannot see reference cycles that pass through GTK, so windows and their page images could leak. | Handlers on a widget's own children are connected weakly (rule 12), and a test checks that closed windows are freed. |
+| Newer GTK and PyGObject change behaviour under the app: PyGObject 3.55 made Python wrappers short-lived (handlers held by a Python weak reference stopped), and GTK's stand-in for a missing accessibility bus crashes on announcements. | CI on the oldest and the newest supported Ubuntu (D8), tests that use GTK's no-bus accessibility backend, and a test failure for any error raised in a handler. |
 | One maintainer and a long feature list. | Small releases that each stand alone, the "will not be" list in section 2, and scope guards on the hard features. |
 | The name collides with a trademark. | Not checked yet. Check before 1.0, while a rename is still cheap. |
 
@@ -958,4 +961,7 @@ harder. What follows from the decision:
 11. When work lands or a decision is made, update this plan.
 12. A widget connects to signals of things it owns (children, controllers,
     adjustments) through `weakly()` from `ui/weak.py`. A plain connection
-    there keeps the widget, and everything it holds, alive forever.
+    there keeps the widget, and everything it holds, alive forever. Weak
+    references to GTK objects are GObject ones (`weak_ref()`), never Python
+    `weakref`: since PyGObject 3.55 a Python wrapper can go away while its
+    object lives on.
