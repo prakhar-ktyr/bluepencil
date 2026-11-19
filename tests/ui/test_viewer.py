@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The page viewer, driven the way a user would drive it."""
 
+import math
 import os
 import signal
 
@@ -10,7 +11,7 @@ import gi
 gi.require_version("Gio", "2.0")
 from gi.repository import Gio  # noqa: E402
 
-from bluepencil.ui.document_view import MARGIN  # noqa: E402
+from bluepencil.ui.document_view import MARGIN, _same_scale  # noqa: E402
 
 from .helpers import drawn_top, loaded  # noqa: E402
 
@@ -47,12 +48,17 @@ def test_fit_page_after_a_jump_keeps_that_page_on_screen(run_app, make_pdf):
         window.activate_action("win.zoom-fit-page", None)
 
     def settled(window) -> bool:
-        """page 237 to be drawn sharply, near the top of the visible area"""
+        """page 237 to be fitted to the visible area, drawn sharply, near the top"""
         view = window.view
         page = view.pages[236]
         return (
             view.fit_mode == "page"
-            and abs(page.texture_scale - view._target_scale(page)) < 0.01
+            # Fitted to the visible area as it is now, and laid out at that
+            # zoom: the view refits just after each change of the visible
+            # area, and GTK lays the pages out again on the next frame.
+            and math.isclose(view.zoom, view._fit_zoom("page"), rel_tol=1e-4)  # as set_zoom judges it
+            and page.get_height() == page.pixel_size()[1]
+            and _same_scale(page.texture_scale, view._target_scale(page))  # no redraw is coming
             and 0 <= drawn_top(view, 236) < 3 * MARGIN
         )
 
