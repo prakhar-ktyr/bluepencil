@@ -1,0 +1,112 @@
+# SPDX-FileCopyrightText: 2026 Prakhar Katiyar
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Builds the snap (plan, Milestone 4) for amd64 and arm64 on every push to
+# main, and keeps each one for 30 days as a download of the run. The amd64
+# snap is then installed and asked to open a PDF on a hidden display, which
+# catches the surprises of the sandbox (D6) before anyone installs it.
+name: Snap
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build for ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build
+        id: build
+        uses: snapcore/action-build@v1
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bluepencil-${{ matrix.arch }}
+          path: ${{ steps.build.outputs.snap }}
+          if-no-files-found: error
+          retention-days: 30
+
+  try:
+    name: Open a PDF in the snap
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: bluepencil-amd64
+
+      - name: Install the snap
+        # The GNOME runtime and the graphics libraries come with it.
+        run: sudo snap install --dangerous ./bluepencil_*_amd64.snap
+
+      - name: Install a hidden display and the tools to watch it
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            xvfb xauth xdotool imagemagick dbus-daemon
+
+      - name: Make a one-page PDF
+        run: |
+          python3 -m venv "$RUNNER_TEMP/pdf"
+          "$RUNNER_TEMP/pdf/bin/pip" install --quiet pymupdf
+          "$RUNNER_TEMP/pdf/bin/python" -c '
+          import pymupdf
+          document = pymupdf.open()
+          document.new_page().insert_text((72, 144), "Hello from the snap", fontsize=36)
+          document.save("sample.pdf")
+          '
+
+      - name: Open it
+        run: |
+          # Where snapd expects a session's runtime folder.
+          XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          export XDG_RUNTIME_DIR
+          sudo install --directory --mode=700 --owner="$(id -u)" --group="$(id -g)" "$XDG_RUNTIME_DIR"
+          cat > open.sh <<'SCRIPT'
+          set -eu
+          snap run bluepencil "$PWD/sample.pdf" > app.log 2>&1 &
+          app=$!
+          # The window is named after the file once the PDF is open.
+          timeout 180 xdotool search --sync --name 'sample\.pdf' > /dev/null
+          sleep 5  # time to draw the page
+          import -window root screenshot.png
+          kill -0 "$app"  # still running
+          kill "$app"
+          SCRIPT
+          xvfb-run --auto-servernum --server-args="-screen 0 1280x800x24" \
+            dbus-run-session -- bash open.sh
+          if grep -q Traceback app.log; then cat app.log; exit 1; fi
+
+      - name: Keep the screenshot and the log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: try-amd64
+          path: |
+            screenshot.png
+            app.log
+          if-no-files-found: ignore
+          retention-days: 30

@@ -1,23 +1,25 @@
 # Bluepencil plan
 
-*Last updated: 18 November 2026.*
+*Last updated: 19 November 2026.*
 
 This is the working plan for the project: what the app is, every feature it
 will have, how it is built, and the order of work. Tick the checkboxes as work
 lands, and change the plan when reality disagrees with it.
 
 **Where things stand:** Milestones 1 (viewer), 2 (organize pages) and 3
-(compress) are built, with 214 tests, and Milestone 4 (package) has its
-icon, desktop file, store metadata and a first snap recipe. Bluepencil opens, shows and remembers PDFs; rotates,
+(compress) are built, with 216 tests. Milestone 4 (package) has its icon,
+desktop file and store metadata, the name `bluepencil` reserved in the Snap
+Store, a snap recipe, and a CI workflow that builds the snap and opens a PDF
+in it; the recipe and the workflow have not run yet. Bluepencil opens, shows and remembers PDFs; rotates,
 deletes, duplicates, moves, inserts, extracts and splits pages, alone or many
 at once in Organize mode; combines files from any folders, put in order
 first and unlocked if locked; undoes and redoes every change;
 saves safely; keeps unsaved changes through an engine crash or a crash of
 the whole app; and compresses to a smaller copy with four presets. Left in these milestones: checks by hand on a real desktop
 (scrolling, memory, dragging pages, files opened in other apps after saving).
-**Next action:** try it by hand (`./dev`), then build the snap with the
-steps in Milestone 4. Publishing needs the Snap Store name reserved first
-(only the owner of the Ubuntu One account can do that).
+**Next action:** push, so that CI builds the snap; install the snap it
+built and run the checklist in Milestone 4; then upload it to `edge` and ask
+for the one-time review of its D-Bus slot (section 8).
 
 ## Contents
 
@@ -457,7 +459,7 @@ release. Anything risky gets a small experiment before its milestone starts.
       to `io.github.prakhar_ktyr.Bluepencil` (18 November 2026)
 - [ ] Before accepting any outside code: set up a contributor licence
       agreement (for example the free CLA Assistant app on GitHub)
-- [ ] Reserve the name `bluepencil` on the Snap Store
+- [x] Reserve the name `bluepencil` on the Snap Store (19 November 2026)
 - [x] Decision 6: compatibility floor raised to Ubuntu 24.04 (18 November 2026)
 - [ ] CI: run the tests on every push, on Ubuntu 24.04 and 26.04. The
       workflow is written (`.github/workflows/tests.yml`: each version in its
@@ -629,20 +631,36 @@ no test or manual check can make the app lose or corrupt a file.
       Bluepencil for PDF files, store metadata file (`data/`); checked by
       `desktop-file-validate` and `appstreamcli validate` in the tests
 - [ ] `snap/snapcraft.yaml`: `core24`, GNOME extension, strict confinement,
-      `home` and `removable-media`, no `network`. **Drafted, not built yet:**
-      snapcraft is not installed here. PyGObject comes from `python3-gi` in
-      the Ubuntu archive; that is the part most likely to need a fix after
-      the first build.
+      `home` and `removable-media`, no `network`. Python, PyGObject, GTK and
+      libadwaita come from the GNOME runtime (`gnome-46-2404`: GTK 4.18,
+      PyGObject 3.54), which also puts PyGObject on the path. A `dbus` slot
+      lets GTK register the app ID on the session bus: a confined app may own
+      only the names it declares, and without this one it would quit at
+      start. Checked with `snapcraft expand-extensions`; not built yet
+      (building needs LXD here, or CI). Tick once it builds
 - [ ] Install the built snap and run the manual checklist: open and save inside
       the home folder, open a file from outside it through the file picker,
       drag and drop, dark mode, HiDPI, Wayland and X11
-- [ ] CI builds the snap for amd64 and arm64 on every push to `main` and
-      publishes it to the `edge` channel
+- [ ] CI builds the snap for amd64 and arm64 on every push to `main`, then
+      installs the amd64 snap and opens a PDF in it on a hidden display,
+      keeping a screenshot and the log (`.github/workflows/snap.yml`; passes
+      actionlint, and its PDF step was rehearsed with the development copy).
+      Tick once its first run is green
+- [ ] CI publishes to the `edge` channel. Needs a store login saved as a
+      GitHub secret (`snapcraft export-login`), after the first upload by hand
 - [ ] Store listing: summary, description, 3–5 screenshots, links, licence,
       category
 - [ ] Tag `v0.1.0`, promote to `stable`, write the changelog
 
-To build and try the snap (about 30 minutes the first time, mostly
+To try the snap that CI built (about 10 minutes, no LXD needed):
+
+```
+gh run download --name bluepencil-amd64         # in the Bluepencil folder
+sudo snap install --dangerous ./bluepencil_0.1.0_amd64.snap
+snap run bluepencil
+```
+
+To build it here instead (about 30 minutes the first time, mostly
 downloads):
 
 ```
@@ -835,11 +853,17 @@ the characters they use, so a replacement character often has no matching font.
 
 **Snap Store (Ubuntu App Center), from release 0.1.** Free.
 
-1. Create an Ubuntu One account and run `snapcraft register bluepencil`.
-2. Build with `snapcraft`; install the result locally and test it.
-3. Upload to the `edge` channel. Review is automatic and takes minutes. A
-   manual review is possible for a new name or extra permissions, and takes
-   from hours to a few days.
+1. Create an Ubuntu One account and run `snapcraft register bluepencil`
+   (done, 19 November 2026).
+2. Build with `snapcraft`, or let CI build it; install the result locally
+   and test it.
+3. Upload to the `edge` channel: `snapcraft upload --release=edge
+   bluepencil_0.1.0_amd64.snap`. Review is automatic and takes minutes,
+   except for the D-Bus slot (the app ID on the session bus), which the
+   store reviews once by hand. Ask in the "store-requests" category of
+   forum.snapcraft.io for the `dbus` slot named
+   `io.github.prakhar_ktyr.Bluepencil`, the app's own ID; a request just
+   like it took 3 days in June 2026. Until then the upload waits.
 4. Fill in the listing: title `Bluepencil`, a summary of at most 78 characters
    that contains "PDF", description, screenshots, icon, licence, links.
 5. Promote to `stable`.
