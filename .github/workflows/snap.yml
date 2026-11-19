@@ -66,7 +66,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
-            xvfb xauth xdotool imagemagick dbus-daemon
+            xvfb xauth xdotool imagemagick dbus-daemon dbus-bin
 
       - name: Make a one-page PDF
         run: |
@@ -81,10 +81,15 @@ jobs:
 
       - name: Open it
         run: |
-          # Where snapd expects a session's runtime folder.
+          # The session's runtime folder and bus, where snapd expects them: a
+          # snap has its own /tmp, so a bus there would be out of its reach.
           XDG_RUNTIME_DIR="/run/user/$(id -u)"
-          export XDG_RUNTIME_DIR
+          DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+          export XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS
           sudo install --directory --mode=700 --owner="$(id -u)" --group="$(id -g)" "$XDG_RUNTIME_DIR"
+          if [ ! -S "$XDG_RUNTIME_DIR/bus" ]; then
+            dbus-daemon --session --address="$DBUS_SESSION_BUS_ADDRESS" --fork
+          fi
           cat > open.sh <<'SCRIPT'
           set -eu
           snap run bluepencil "$PWD/sample.pdf" > app.log 2>&1 &
@@ -94,10 +99,13 @@ jobs:
           sleep 5  # time to draw the page
           import -window root screenshot.png
           kill -0 "$app"  # still running
+          # GTK registered the app under its ID: the snap's D-Bus slot works.
+          dbus-send --session --print-reply --dest=org.freedesktop.DBus \
+            /org/freedesktop/DBus org.freedesktop.DBus.GetNameOwner \
+            string:io.github.prakhar_ktyr.Bluepencil > /dev/null
           kill "$app"
           SCRIPT
-          xvfb-run --auto-servernum --server-args="-screen 0 1280x800x24" \
-            dbus-run-session -- bash open.sh
+          xvfb-run --auto-servernum --server-args="-screen 0 1280x800x24" bash open.sh
           if grep -q Traceback app.log; then cat app.log; exit 1; fi
 
       - name: Keep the screenshot and the log
