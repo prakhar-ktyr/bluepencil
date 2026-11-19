@@ -117,7 +117,8 @@ def test_snapshots_are_private_and_deleted_on_close(make_pdf, tmp_path):
     folder = current.folder
     assert folder is not None and folder.parent == tmp_path / "cache" / "bluepencil" / "snapshots"
     assert stat.S_IMODE(folder.stat().st_mode) == 0o700
-    assert len(list(folder.iterdir())) == 2
+    assert len(list(folder.glob("*.pdf"))) == 2
+    assert (folder / "session.json").exists()
     current.close()
     assert not folder.exists()
 

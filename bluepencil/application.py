@@ -14,6 +14,7 @@ from . import APP_ID, APP_NAME, APP_SUMMARY, COPYRIGHT, VERSION  # noqa: E402
 from .core.memory import release_memory_promptly  # noqa: E402
 from .history import History  # noqa: E402
 from .i18n import _  # noqa: E402
+from .recovery import Recoverable, discard, find_recoverable  # noqa: E402
 from .ui.styles import load_styles  # noqa: E402
 from .window import BluepencilWindow  # noqa: E402
 
@@ -59,6 +60,8 @@ class BluepencilApplication(Adw.Application):
         release_memory_promptly()
         #: Recent files and where the reader left each one, for every window.
         self.history = History()
+        #: Changes to offer back after a crash; looked for once, at startup.
+        self._recoverable: list[Recoverable] | None = None
         self._add_action("about", self._on_about)
         self._add_action("quit", self._on_quit, ["<primary>q"])
         for action, shortcuts in _SHORTCUTS.items():
@@ -71,6 +74,7 @@ class BluepencilApplication(Adw.Application):
     def do_activate(self) -> None:
         window = self.props.active_window or BluepencilWindow(application=self)
         window.present()
+        self._offer_recovery(window)
 
     def do_open(self, files: list[Gio.File], n_files: int, hint: str) -> None:
         for file in files:
@@ -94,6 +98,7 @@ class BluepencilApplication(Adw.Application):
             window = BluepencilWindow(application=self)
         window.present()
         window.open_file(file)
+        self._offer_recovery(window)
 
     def _add_action(
         self,
@@ -106,6 +111,40 @@ class BluepencilApplication(Adw.Application):
         self.add_action(action)
         if shortcuts:
             self.set_accels_for_action(f"app.{name}", shortcuts)
+
+    def _offer_recovery(self, window: BluepencilWindow) -> None:
+        """Once per run: offer changes left unsaved when Bluepencil last stopped."""
+        if self._recoverable is not None:
+            return
+        self._recoverable = find_recoverable()
+        if not self._recoverable:
+            return
+        names = "\n".join(f"• {item.name}" for item in self._recoverable)
+        dialog = Adw.AlertDialog(
+            heading=_("Recover Unsaved Changes?"),
+            body=_("Bluepencil stopped before these changes were saved:\n{names}").format(names=names),
+        )
+        dialog.add_response("discard", _("_Discard"))
+        dialog.add_response("recover", _("_Recover"))
+        dialog.set_response_appearance("discard", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_response_appearance("recover", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("recover")
+        dialog.set_close_response("recover")  # closing it keeps them for next time
+        dialog.connect("response", self._on_recovery_response)
+        dialog.present(window)
+
+    def _on_recovery_response(self, _dialog: Adw.AlertDialog, response: str) -> None:
+        items, self._recoverable = self._recoverable or [], []
+        for item in items:
+            if response == "discard":
+                discard(item)
+                continue
+            window = next(
+                (w for w in self.get_windows() if isinstance(w, BluepencilWindow) and w.is_empty),
+                None,
+            ) or BluepencilWindow(application=self)
+            window.present()
+            window.recover(item)
 
     def _on_quit(self, *_args: object) -> None:
         # Closing each window lets those with unsaved changes ask first; the

@@ -108,14 +108,19 @@ class EngineClient(GObject.Object):
         """Forget a request that has not been sent to the engine yet."""
         self._waiting.pop(key, None)
 
-    def close(self) -> None:
-        """Stop the engine process and forget every request."""
+    def close(self, keep_snapshots: bool = False) -> None:
+        """Stop the engine process and forget every request.
+
+        With `keep_snapshots`, the engine is not asked to quit, only left: it
+        then keeps its snapshots, so unsaved changes can be recovered later.
+        """
         process, self._process = self._process, None
         self._forget_requests()
         if process is None:
             return
         with contextlib.suppress(OSError, ValueError):
-            protocol.write_message(_stdin(process), {"op": "quit", "id": 0})
+            if not keep_snapshots:
+                protocol.write_message(_stdin(process), {"op": "quit", "id": 0})
             _stdin(process).close()
         try:
             process.wait(timeout=2)

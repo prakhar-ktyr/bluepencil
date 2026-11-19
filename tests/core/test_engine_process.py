@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The engine as its own process, spoken to through the message protocol."""
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -9,6 +10,8 @@ from pathlib import Path
 import pytest
 
 from bluepencil.core import protocol
+
+from ..crash import crash_after_rotating
 
 
 @pytest.fixture
@@ -100,3 +103,13 @@ def test_a_refused_edit_says_why(engine, make_pdf):
     assert reply["ok"] is False and reply["error"] == "no-pages-left"
     reply, _ = ask(engine, {"op": "save", "path": "/nonexistent-folder/out.pdf", "id": 3})
     assert reply["ok"] is False and reply["error"] == "write-failed"
+
+
+def test_snapshots_stay_if_the_interface_goes_away(make_pdf):
+    path = make_pdf()
+    history = crash_after_rotating(path)
+    folder = Path(history["folder"])
+    manifest = json.loads((folder / "session.json").read_text())
+    assert manifest["path"] == str(path)
+    assert (manifest["position"], manifest["saved_position"]) == (1, 0)
+    assert all((folder / name).exists() for name in manifest["files"])

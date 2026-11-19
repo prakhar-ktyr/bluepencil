@@ -106,9 +106,9 @@ class Engine:
         written = pages.split(session.document, request["groups"], request["folder"], request["stem"], session.password)
         return {"ok": True, "paths": written}, b""
 
-    def close(self) -> None:
+    def close(self, keep_snapshots: bool = False) -> None:
         if self.session is not None:
-            self.session.close()
+            self.session.close(keep_snapshots)
             self.session = None
 
     def _combine(self, request: dict) -> tuple[dict, bytes]:
@@ -145,20 +145,22 @@ class Engine:
 def serve(requests: IO[bytes], replies: IO[bytes]) -> None:
     """Answer requests until asked to quit or the interface goes away."""
     engine = Engine()
+    asked_to_quit = False
     try:
-        _answer(engine, requests, replies)
+        asked_to_quit = _answer(engine, requests, replies)
     finally:
-        # Snapshots are kept only if the process dies without getting here:
-        # then they are what a new engine carries on from.
-        engine.close()
+        # Snapshots go only when the interface says so. If it went away
+        # without a word, it crashed: they hold unsaved changes to recover.
+        engine.close(keep_snapshots=not asked_to_quit)
 
 
-def _answer(engine: Engine, requests: IO[bytes], replies: IO[bytes]) -> None:
+def _answer(engine: Engine, requests: IO[bytes], replies: IO[bytes]) -> bool:
+    """Answer requests; True if asked to quit, False if the interface went away."""
     while (message := protocol.read_message(requests)) is not None:
         request, _payload = message
         if request.get("op") == "quit":
             protocol.write_message(replies, {"id": request.get("id"), "ok": True})
-            return
+            return True
         try:
             reply, data = engine.handle(request)
         except Exception as error:  # noqa: BLE001 - one bad request must not end the engine
@@ -166,6 +168,7 @@ def _answer(engine: Engine, requests: IO[bytes], replies: IO[bytes]) -> None:
             reply, data = {"ok": False, "error": "internal", "detail": detail}, b""
         reply["id"] = request.get("id")
         protocol.write_message(replies, reply, data)
+    return False
 
 
 def main() -> None:

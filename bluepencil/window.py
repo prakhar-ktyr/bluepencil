@@ -20,6 +20,7 @@ from . import APP_NAME  # noqa: E402
 from .engine_client import EngineClient  # noqa: E402
 from .history import History  # noqa: E402
 from .i18n import _  # noqa: E402
+from .recovery import Recoverable  # noqa: E402
 from .ui.document_view import DocumentView, FitMode  # noqa: E402
 from .ui.organize import OrganizeView  # noqa: E402
 from .ui.split_dialog import SplitDialog  # noqa: E402
@@ -132,6 +133,8 @@ class BluepencilWindow(Adw.ApplicationWindow):
         self._engine: EngineClient | None = None
         self._loading: Gio.File | None = None
         self._loading_password: str | None = None
+        #: History to carry on from, when recovering changes after a crash.
+        self._loading_history: dict | None = None
         #: The file whose password dialog is open.
         self._asking: Gio.File | None = None
         self._password: str | None = None
@@ -212,7 +215,10 @@ class BluepencilWindow(Adw.ApplicationWindow):
             self._history.disconnect(self._history_handler)
             self._history_handler = 0
         if self._engine is not None:
-            self._engine.close()
+            # Changes neither saved nor discarded, as when the app is stopped
+            # without asking, stay recoverable.
+            unsaved = bool(self._state.get("modified")) and not self._discard_confirmed
+            self._engine.close(keep_snapshots=unsaved)
             self._engine = None
 
     @property
@@ -221,12 +227,18 @@ class BluepencilWindow(Adw.ApplicationWindow):
 
     # Opening
 
+    def recover(self, item: Recoverable) -> None:
+        """Open the changes Bluepencil kept when it stopped unexpectedly."""
+        self._restarts = []
+        self._loading_history = item.history
+        self._load(Gio.File.new_for_path(item.path), None)
+
     def _load(self, file: Gio.File, password: str | None) -> None:
         self._loading = file
         self._loading_password = password
         engine = self._ensure_engine()
         engine.request(
-            {"op": "open", "path": file.get_path(), "password": password},
+            {"op": "open", "path": file.get_path(), "password": password, "history": self._loading_history},
             functools.partial(self._on_opened, file, password),
             key=("open",),
             priority=OPEN_PRIORITY,
@@ -297,6 +309,8 @@ class BluepencilWindow(Adw.ApplicationWindow):
             return  # another file was asked for in the meantime
         self._loading = None
         error = reply.get("error")
+        if error not in ("needs-password", "wrong-password"):
+            self._loading_history = None  # used, or of no use
         if reply.get("ok"):
             self._show_document(file, password, reply)
         elif error in ("needs-password", "wrong-password"):
@@ -316,7 +330,7 @@ class BluepencilWindow(Adw.ApplicationWindow):
             )
         else:
             view = DocumentView(engine, info["pages"], size_hint=size)
-        if not info.get("untitled"):
+        if not info.get("untitled") and Path(path).exists():
             self._history.opened(path)
         view.connect("current-page-changed", weakly(self._on_current_page_changed))
         view.connect("zoom-changed", weakly(self._on_zoom_changed))

@@ -7,13 +7,12 @@ will have, how it is built, and the order of work. Tick the checkboxes as work
 lands, and change the plan when reality disagrees with it.
 
 **Where things stand:** Milestones 1 (viewer) and 2 (organize pages) are
-built, with 154 tests. Bluepencil opens, shows and remembers PDFs; rotates,
+built, with 163 tests. Bluepencil opens, shows and remembers PDFs; rotates,
 deletes, duplicates, moves, inserts, extracts and splits pages, alone or many
 at once in Organize mode; combines files; undoes and redoes every change;
-saves safely; and keeps unsaved changes through an engine crash. Left in
-these milestones: checks by hand on a real desktop (scrolling, memory,
-dragging pages, files opened in other apps after saving) and a recovery copy
-after the whole app stops.
+saves safely; and keeps unsaved changes through an engine crash or a crash
+of the whole app. Left in these milestones: checks by hand on a real desktop
+(scrolling, memory, dragging pages, files opened in other apps after saving).
 **Next action:** try it by hand (`./dev`), then Milestone 3, Compress.
 Alongside it: reserve the Snap Store name.
 
@@ -361,6 +360,10 @@ snapshot doubles as the recovery copy after a crash. Snapshots are deleted
 when the document closes. PyMuPDF's built-in undo journal was tested and
 rejected (5.4). If snapshots prove too slow on very large files, small edits
 such as annotations can record their own reverse step instead.
+Built in `core/session.py`. Each snapshot folder also holds `session.json`,
+naming the file and the history, so that a new engine, or the next start of
+the app, can carry on from it; the folder is deleted only once the changes
+are saved or discarded.
 
 **D5. Saving always rewrites the whole file.** Save writes a complete new file
 to a temporary location, reopens it to confirm it is valid, and only then
@@ -557,7 +560,9 @@ Engine
       unless told to keep it, so every write passes `KEEP_ENCRYPTION`.
 - [x] If the engine dies, a new one carries on from its snapshots, edits and
       history included
-- [ ] Recovery copy offered after the whole app stops unexpectedly
+- [x] Recovery after the whole app stops unexpectedly: snapshots are deleted
+      only when changes are saved or discarded; otherwise the next start
+      offers them back (`recovery.py`), unsaved, with their undo history
 
 Interface
 

@@ -11,6 +11,7 @@ it, and only then puts it in the original's place.
 """
 
 import errno
+import json
 import os
 import secrets
 import shutil
@@ -23,6 +24,7 @@ import pymupdf
 
 from . import pages
 from .document import KEEP_ENCRYPTION, describe, open_document
+from .places import MANIFEST, snapshots_root
 
 #: Steps that can be undone, and the disk space their snapshots may take;
 #: the oldest steps go first, but never below MIN_STEPS.
@@ -45,13 +47,6 @@ DISK_FULL = "disk-full"
 READ_ONLY = "read-only"
 WRITE_FAILED = "write-failed"
 CHECK_FAILED = "check-failed"
-
-
-def snapshots_root() -> Path:
-    """Where snapshot folders live: ~/.cache/bluepencil/snapshots (plan, D7)."""
-    cache = os.environ.get("XDG_CACHE_HOME", "")
-    base = Path(cache) if Path(cache).is_absolute() else Path.home() / ".cache"
-    return base / "bluepencil" / "snapshots"
 
 
 class Session:
@@ -91,6 +86,7 @@ class Session:
         # The first snapshot holds the new document, so that undo stops there
         # and a crash loses nothing; it is not on disk, so it counts as unsaved.
         session._snapshot()
+        session._write_manifest()
         return session
 
     @classmethod
@@ -118,6 +114,7 @@ class Session:
             session.document = open_document(str(snapshots[position]), password)
             session.folder, session.snapshots = Path(folder), snapshots
             session.position, session.saved_position = position, saved_position
+            session._write_manifest()  # this engine looks after them now
         else:
             # Without its snapshots, the history is gone: start again from the file.
             session.document = open_document(path, password)
@@ -160,15 +157,18 @@ class Session:
             self.saved_position = -1  # the saved state was undone and is now gone
         self._snapshot()
         self._forget_old_steps()
+        self._write_manifest()
         return selection
 
     def undo(self) -> None:
         if self.can_undo:
             self._load(self.position - 1)
+            self._write_manifest()
 
     def redo(self) -> None:
         if self.can_redo:
             self._load(self.position + 1)
+            self._write_manifest()
 
     # Saving
 
@@ -199,6 +199,7 @@ class Session:
         self.path = str(destination)
         self.saved_position = self.position
         self.untitled = False
+        self._write_manifest()
 
     def _check(self, path: Path) -> None:
         """Reopen a written file to make sure it is complete."""
@@ -233,12 +234,32 @@ class Session:
             },
         }
 
-    def close(self) -> None:
-        """Close the document and delete its snapshots."""
+    def close(self, keep_snapshots: bool = False) -> None:
+        """Close the document and delete its snapshots, or keep them so that
+        unsaved changes can be recovered."""
         self.document.close()
-        if self.folder is not None:
+        if self.folder is not None and not keep_snapshots:
             shutil.rmtree(self.folder, ignore_errors=True)
             self.folder = None
+
+    def _write_manifest(self) -> None:
+        """Say in the snapshot folder what it holds, for recovery."""
+        if self.folder is None:
+            return
+        manifest = {
+            "format": 1,
+            "path": self.path,
+            "untitled": self.untitled,
+            "files": [snapshot.name for snapshot in self.snapshots],
+            "position": self.position,
+            "saved_position": self.saved_position,
+            # While either process runs, the snapshots are in use.
+            "engine": os.getpid(),
+            "interface": os.getppid(),
+        }
+        temporary = self.folder / f"{MANIFEST}.tmp"
+        temporary.write_text(json.dumps(manifest))
+        temporary.replace(self.folder / MANIFEST)
 
     # Snapshots
 
