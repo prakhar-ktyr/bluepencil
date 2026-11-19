@@ -1061,16 +1061,17 @@ class BluepencilWindow(Adw.ApplicationWindow):
 
     def _build_status_page(self) -> Adw.StatusPage:
         """The start page, which also shows "Opening…" and errors."""
-        self._open_button = Gtk.Button(label=_("Open PDF…"), action_name="win.open", halign=Gtk.Align.CENTER)
+        self._open_button = Gtk.Button(label=_("Open PDF…"), action_name="win.open")
         self._open_button.add_css_class("pill")
         self._open_button.add_css_class("suggested-action")
         self._combine_button = Gtk.Button(
             label=_("Combine Files…"),
             action_name="win.combine",
-            halign=Gtk.Align.CENTER,
             tooltip_text=_("Make one PDF from several PDFs and pictures"),
         )
         self._combine_button.add_css_class("pill")
+        # Both buttons fill the centred box, so both are as wide as the wider
+        # one: stacked buttons line up, and colour alone says which matters.
         buttons = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, halign=Gtk.Align.CENTER)
         buttons.append(self._open_button)
         buttons.append(self._combine_button)

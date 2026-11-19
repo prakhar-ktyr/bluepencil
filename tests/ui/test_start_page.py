@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Prakhar Katiyar
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The start page's recent files, and returning to where the reader left a file."""
+"""The start page: its buttons, its recent files, and returning to where the
+reader left a file."""
 
 import gi
 import pytest
@@ -66,6 +67,21 @@ def test_the_start_page_lists_recent_files_newest_first(run_app, make_pdf):
         assert window._recent_rows[0][1].get_subtitle() == str(newer.parent)
 
     run_app((start_page_shown, check))
+
+
+def test_the_start_buttons_are_equally_wide(run_app):
+    def laid_out(window) -> bool:
+        """the buttons laid out"""
+        return start_page_shown(window) and window._combine_button.get_width() > 0
+
+    def check(window) -> None:
+        open_button, combine = window._open_button, window._combine_button
+        assert open_button.get_width() == combine.get_width()
+        # As wide as the wider button needs, not stretched across the page.
+        widest = max(button.measure(Gtk.Orientation.HORIZONTAL, -1)[1] for button in (open_button, combine))
+        assert combine.get_parent().get_width() == widest
+
+    run_app((laid_out, check))
 
 
 def test_without_recent_files_the_list_is_hidden(run_app):
