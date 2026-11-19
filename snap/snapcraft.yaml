@@ -1,8 +1,8 @@
 # SPDX-FileCopyrightText: 2026 Prakhar Katiyar
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# First draft, not built yet: building needs snapcraft, which is not on the
-# development machine. See docs/PLAN.md, Milestone 4, for the steps.
+# Built by GitHub Actions (.github/workflows/snap.yml) on every push to main,
+# or by hand with the steps in docs/PLAN.md, Milestone 4.
 #
 # Plan D6: strictly confined, with access to the home folder and removable
 # drives only, and no network access at all.
@@ -10,6 +10,7 @@
 name: bluepencil
 title: Bluepencil
 base: core24
+# Kept equal to bluepencil.VERSION by tests/test_packaging.py.
 version: '0.1.0'
 summary: Read, organize and compress PDFs, fully offline
 description: |
@@ -22,6 +23,7 @@ description: |
   - Combine PDFs and pictures into one document, or split one into parts
   - Compress a PDF into a smaller copy, with the real size shown first
   - Undo every change: nothing is written until you save
+# Only the edge and beta channels take a devel snap: becomes stable for 0.1.0.
 grade: devel
 confinement: strict
 license: AGPL-3.0-or-later
@@ -37,23 +39,29 @@ platforms:
 apps:
   bluepencil:
     command: bin/bluepencil
+    # Python, PyGObject, GTK and libadwaita all come from the GNOME runtime
+    # that the extension connects; its launcher puts PyGObject on the path.
     extensions: [gnome]
     desktop: usr/share/applications/io.github.prakhar_ktyr.Bluepencil.desktop
     common-id: io.github.prakhar_ktyr.Bluepencil
     plugs:
       - home
       - removable-media
-    environment:
-      # PyGObject comes from the Ubuntu archive (python3-gi, below); GTK and
-      # libadwaita come from the GNOME runtime that the extension connects.
-      PYTHONPATH: $SNAP/usr/lib/python3/dist-packages
+
+slots:
+  # GTK registers the app on the session bus under its app ID, which is how a
+  # second file reaches the window already open. A strictly confined app may
+  # own only the names it declares; without this one it would not start.
+  # The store reviews this slot once, by request on forum.snapcraft.io.
+  bluepencil:
+    interface: dbus
+    bus: session
+    name: io.github.prakhar_ktyr.Bluepencil
 
 parts:
   bluepencil:
     plugin: python
     source: .
-    stage-packages:
-      - python3-gi
 
   data:
     plugin: dump

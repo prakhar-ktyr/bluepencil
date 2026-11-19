@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The files that describe Bluepencil to the desktop and to the app stores."""
 
+import re
 import shutil
 import subprocess
 import xml.etree.ElementTree as ET
@@ -9,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from bluepencil import APP_ID
+from bluepencil import APP_ID, VERSION
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
@@ -17,6 +18,7 @@ DESKTOP = DATA / f"{APP_ID}.desktop"
 METAINFO = DATA / f"{APP_ID}.metainfo.xml"
 ICON = DATA / "icons" / "hicolor" / "scalable" / "apps" / f"{APP_ID}.svg"
 SYMBOLIC = DATA / "icons" / "hicolor" / "symbolic" / "apps" / f"{APP_ID}-symbolic.svg"
+RECIPE = ROOT / "snap" / "snapcraft.yaml"
 
 
 def test_the_desktop_file_registers_bluepencil_for_pdfs():
@@ -53,9 +55,34 @@ def test_the_icons_are_square(icon, size):
     assert root.get("width") == root.get("height") == size
 
 
+def under(header: str) -> list[str]:
+    """The lines indented under `header`, a line of the snap recipe, without
+    comments."""
+    lines = RECIPE.read_text().splitlines()
+    depth = len(header) - len(header.lstrip())
+    block = []
+    for line in lines[lines.index(header) + 1 :]:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if len(line) - len(line.lstrip()) <= depth:
+            break
+        block.append(line.strip())
+    return block
+
+
 def test_the_snap_is_confined_and_has_no_network_access():
-    recipe = (ROOT / "snap" / "snapcraft.yaml").read_text()
-    assert "confinement: strict" in recipe
-    plugs = recipe.split("    plugs:")[1].split("    environment:")[0]
-    assert [line.strip() for line in plugs.strip().splitlines()] == ["- home", "- removable-media"]
-    assert f"common-id: {APP_ID}" in recipe
+    lines = RECIPE.read_text().splitlines()
+    assert "confinement: strict" in lines
+    assert under("    plugs:") == ["- home", "- removable-media"]
+    assert f"    common-id: {APP_ID}" in lines
+
+
+def test_the_snap_has_the_version_of_the_app():
+    found = re.search(r"^version: '([^']+)'$", RECIPE.read_text(), re.MULTILINE)
+    assert found is not None
+    assert found.group(1) == VERSION
+
+
+def test_the_snap_may_register_the_app_on_the_session_bus():
+    # GTK owns the app ID as a bus name; a confined app that may not, quits.
+    assert {"interface: dbus", "bus: session", f"name: {APP_ID}"} <= set(under("slots:"))
