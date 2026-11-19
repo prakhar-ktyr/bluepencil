@@ -74,3 +74,12 @@ def test_a_missing_file_is_reported(tmp_path):
     with pytest.raises(OpenError) as error:
         preview.inspect(str(tmp_path / "gone.pdf"))
     assert error.value.code == "not-found"
+
+
+def test_a_phone_photo_is_shown_upright(phone_photo):
+    info, pixels = preview.inspect(phone_photo, size=96)
+    assert (info["width"], info["height"]) == (72, 96)
+    check_image(info, pixels)
+    top_middle = (5 * info["width"] + info["width"] // 2) * 3
+    red, _green, blue = pixels[top_middle : top_middle + 3]
+    assert blue > red + 80

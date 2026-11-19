@@ -63,3 +63,26 @@ def photos(tmp_path):
     path = tmp_path / "photos.pdf"
     document.save(path, deflate=True)
     return path
+
+
+@pytest.fixture
+def phone_photo(tmp_path):
+    """A JPEG stored 400 wide and 300 high, with a blue band down its left
+    edge, tagged to be turned 90 degrees clockwise for viewing, as phones
+    store portrait photos. Upright it is 300 wide and 400 high, the band on
+    top."""
+    picture = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 400, 300), False)
+    picture.clear_with(200)
+    picture.set_rect(pymupdf.IRect(0, 0, 100, 300), (40, 40, 200))
+    path = tmp_path / "phone.jpg"
+    picture.save(str(path))
+    # An Exif block with just the orientation (tag 0x0112) set to 6.
+    tiff = (
+        b"MM\x00\x2a" + (8).to_bytes(4, "big") + (1).to_bytes(2, "big")
+        + (0x0112).to_bytes(2, "big") + (3).to_bytes(2, "big") + (1).to_bytes(4, "big")
+        + (6).to_bytes(2, "big") + b"\x00\x00" + (0).to_bytes(4, "big")
+    )
+    exif = b"Exif\x00\x00" + tiff
+    jpeg = path.read_bytes()
+    path.write_bytes(jpeg[:2] + b"\xff\xe1" + (len(exif) + 2).to_bytes(2, "big") + exif + jpeg[2:])
+    return str(path)

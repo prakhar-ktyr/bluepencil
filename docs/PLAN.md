@@ -7,7 +7,7 @@ will have, how it is built, and the order of work. Tick the checkboxes as work
 lands, and change the plan when reality disagrees with it.
 
 **Where things stand:** Milestones 1 (viewer), 2 (organize pages) and 3
-(compress) are built, with 208 tests, and Milestone 4 (package) has its
+(compress) are built, with 210 tests, and Milestone 4 (package) has its
 icon, desktop file, store metadata and a first snap recipe. Bluepencil opens, shows and remembers PDFs; rotates,
 deletes, duplicates, moves, inserts, extracts and splits pages, alone or many
 at once in Organize mode; combines files from any folders, put in order

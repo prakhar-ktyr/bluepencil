@@ -13,7 +13,7 @@ from pathlib import Path
 import pymupdf
 
 from .document import OpenError, open_document
-from .pages import NOT_READABLE_AS_PDF, UNSUPPORTED_FILE, PageError
+from .pages import NOT_READABLE_AS_PDF, UNSUPPORTED_FILE, PageError, image_turn
 
 #: Kinds of file.
 PDF = "pdf"
@@ -49,12 +49,15 @@ def _picture(path: str, size: int, not_pdf: OpenError) -> tuple[dict, bytes]:
     scale = min(1.0, size / max(picture.width, picture.height, 1))
     width, height = max(1, round(picture.width * scale)), max(1, round(picture.height * scale))
     small = pymupdf.Pixmap(picture, width, height, None)
-    if small.alpha or small.colorspace is None or small.colorspace.n != 3:
-        # On a white page, as it will look once combined.
+    turn = image_turn(path)
+    if turn or small.alpha or small.colorspace is None or small.colorspace.n != 3:
+        # Upright, on a white page, as it will look once combined.
+        if turn in (90, 270):
+            width, height = height, width
         sheet = pymupdf.open()
         try:
             page = sheet.new_page(width=width, height=height)
-            page.insert_image(page.rect, pixmap=small)
+            page.insert_image(page.rect, pixmap=small, rotate=turn)
             small = page.get_pixmap(alpha=False)
         finally:
             sheet.close()

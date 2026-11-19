@@ -290,3 +290,16 @@ def test_insert_files_unlocks_locked_pdfs_and_leaves_their_password_behind(docum
     result = pymupdf.open(tmp_path / "result.pdf")
     assert not result.needs_pass
     assert labels(result)[:3] == ["Page 1", "Page 2", "Page 1"]
+
+
+def blue(pixel: tuple[int, ...]) -> bool:
+    return pixel[2] > pixel[0] + 80
+
+
+def test_insert_image_turns_phone_photos_upright(document, phone_photo):
+    assert pages.image_turn(phone_photo) == 270
+    pages.insert_image(document, phone_photo, 0)
+    page = document[0]
+    assert round(page.rect.height / page.rect.width, 3) == round(400 / 300, 3)  # portrait, as seen
+    drawn = page.get_pixmap()
+    assert blue(drawn.pixel(drawn.width // 2, 10)) and not blue(drawn.pixel(10, drawn.height // 2))

@@ -120,8 +120,24 @@ def insert_pdf(document: pymupdf.Document, path: str, at: int, password: str | N
     return list(range(at, at + count))
 
 
+def image_turn(path: str) -> int:
+    """How far a picture must turn to stand upright, in degrees anticlockwise.
+
+    Phones store photos as the sensor saw them and say in a tag which way up
+    they go; the PDF format has no such tag, so the turn must be made.
+    """
+    try:
+        orientation = pymupdf.mupdf.fz_image_orientation(pymupdf.mupdf.fz_new_image_from_file(path))
+    except (RuntimeError, ValueError, pymupdf.mupdf.FzErrorBase):
+        return 0
+    # MuPDF's numbers: 1 to 4 turn by 0, 90, 180 and 270 degrees
+    # anticlockwise; 5 to 8 also mirror, which phones do not ask for.
+    return ((orientation - 1) % 4) * 90 if orientation > 0 else 0
+
+
 def insert_image(document: pymupdf.Document, path: str, at: int) -> list[int]:
-    """Insert a picture (JPEG, PNG, TIFF and others) as a page of its own."""
+    """Insert a picture (JPEG, PNG, TIFF and others) as a page of its own,
+    upright even when it was stored on its side."""
     at = _insertion_point(document, at)
     try:
         picture = pymupdf.Pixmap(path)
@@ -129,16 +145,19 @@ def insert_image(document: pymupdf.Document, path: str, at: int) -> list[int]:
         raise PageError(NOT_AN_IMAGE, str(error)) from error
     except FileNotFoundError as error:
         raise OpenError("not-found", path) from error
+    turn = image_turn(path)
     # Its own size at its own resolution, scaled down to fit an A4 page.
     resolution = picture.xres or 96, picture.yres or 96
     width, height = picture.width * 72 / resolution[0], picture.height * 72 / resolution[1]
+    if turn in (90, 270):
+        width, height = height, width
     limit = _IMAGE_PAGE_LIMIT if height >= width else _IMAGE_PAGE_LIMIT[::-1]
     scale = min(1.0, limit[0] / width, limit[1] / height)
     page = document.new_page(
         pno=at if at < document.page_count else -1, width=width * scale, height=height * scale
     )
     # From the file itself, so a JPEG is stored as it is, without recompressing.
-    page.insert_image(page.rect, filename=path)
+    page.insert_image(page.rect, filename=path, rotate=turn)
     return [at]
 
 
