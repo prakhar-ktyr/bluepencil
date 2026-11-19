@@ -3,7 +3,7 @@
 """Memory is given back when a window closes."""
 
 import gc
-import weakref
+from collections.abc import Callable
 
 from bluepencil.window import BluepencilWindow
 
@@ -14,10 +14,12 @@ from .test_sidebar import show_sidebar, thumbnails_shown
 def test_a_closed_window_is_freed_with_its_pages(run_app, make_pdf):
     # Closed windows used to stay in memory with every page they had
     # rendered: about 1 GB after a few files (see bluepencil/ui/weak.py).
-    references: list[weakref.ref] = []
+    # GObject weak references: a Python one to a wrapper can go dead while
+    # the object lives on (PyGObject 3.55 and later).
+    references: list[Callable[[], object]] = []
 
     def close(window) -> None:
-        references.extend(weakref.ref(thing) for thing in (window, window.view, window.sidebar))
+        references.extend(thing.weak_ref() for thing in (window, window.view, window.sidebar))
         # A second window keeps the app running once the first one closes.
         BluepencilWindow(application=window.get_application()).present()
         window.close()

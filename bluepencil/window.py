@@ -6,7 +6,6 @@ import functools
 import inspect
 import shutil
 import time
-import weakref
 from collections.abc import Callable
 from pathlib import Path
 
@@ -1093,7 +1092,7 @@ class BluepencilWindow(Adw.ApplicationWindow):
 
     def _view_action(self, method: Callable[[DocumentView], object]) -> Callable[..., None]:
         """An action handler that calls `method` on the page view, if any."""
-        window = weakref.ref(self)
+        window = self.weak_ref()  # the GObject, not its wrapper (see ui/weak.py)
 
         def activate(*_args: object) -> None:
             view = getattr(window(), "view", None)
