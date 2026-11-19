@@ -86,9 +86,12 @@ class CompressDialog(Adw.Dialog):
             row = Adw.ActionRow(title=title, subtitle=subtitle, activatable_widget=check)
             row.add_prefix(check)
             group.add(row)
-            check.connect("toggled", weakly(self._on_choice_changed))
             self.choices[key] = check
+        # The default is chosen before anything listens: there is no result
+        # or stage to reset yet.
         self.choices["balanced"].set_active(True)
+        for check in self.choices.values():
+            check.connect("toggled", weakly(self._on_choice_changed))
         self._group = group
 
         self.compress_button = Gtk.Button(label=_("_Compress"), use_underline=True, halign=Gtk.Align.CENTER)

@@ -4,6 +4,8 @@
 
 import os
 import random
+import sys
+import traceback
 
 import pymupdf
 import pytest
@@ -11,6 +13,17 @@ import pytest
 # Desktop settings start from their defaults in tests, whatever the
 # developer's own desktop is set to. GLib reads this once, at first use.
 os.environ["GSETTINGS_BACKEND"] = "memory"
+
+
+@pytest.fixture(autouse=True)
+def no_errors_in_handlers(monkeypatch):
+    """Fail the test if a signal handler or a callback raised. PyGObject only
+    prints those errors, through sys.excepthook, and carries on, so a test
+    would pass unless it checks exactly what broke."""
+    raised: list[str] = []
+    monkeypatch.setattr(sys, "excepthook", lambda *error: raised.append("".join(traceback.format_exception(*error))))
+    yield
+    assert not raised, "an error was raised in a handler:\n" + "\n".join(raised)
 
 
 @pytest.fixture(autouse=True)
