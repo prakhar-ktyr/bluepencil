@@ -386,6 +386,7 @@ class BluepencilWindow(Adw.ApplicationWindow):
             self._history.opened(path)
         view.connect("current-page-changed", weakly(self._on_current_page_changed))
         view.connect("zoom-changed", weakly(self._on_zoom_changed))
+        self._on_zoom_changed(view)
         self.view = view
         self.current_file = file
         self._password = password
@@ -692,6 +693,9 @@ class BluepencilWindow(Adw.ApplicationWindow):
         view = DocumentView(engine, state["pages"], zoom=zoom, fit=fit, page=page, size_hint=size)
         view.connect("current-page-changed", weakly(self._on_current_page_changed))
         view.connect("zoom-changed", weakly(self._on_zoom_changed))
+        # A new view starts at its own zoom, fitted to its new pages, before
+        # it says so: show that zoom now, not after the next layout.
+        self._on_zoom_changed(view)
         self.view = view
         self._state = state
         self._page_sizes = state["pages"]
