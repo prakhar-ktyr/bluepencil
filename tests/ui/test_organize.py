@@ -271,3 +271,21 @@ def test_combine_files_makes_a_new_document_to_put_in_order_and_save(run_app, ma
         (combined, check_and_save),
         (saved, check_saved),
     )
+
+
+def test_everything_fits_in_the_narrowest_window(run_app, make_pdf):
+    def narrow_and_organize(window) -> None:
+        window.set_default_size(360, 700)
+        organize(window)
+
+    def narrow(window) -> bool:
+        """the narrow layout"""
+        return grid_shown(window) and window.get_width() <= 360 and window._more_pages_button.get_visible()
+
+    def check(window) -> None:
+        for mode_on in (True, False):
+            window._set_organize(mode_on)
+            minimum, _natural, _baseline, _ = window.get_content().measure(Gtk.Orientation.HORIZONTAL, -1)
+            assert minimum <= 360, f"{minimum} pixels wide with Organize {'on' if mode_on else 'off'}"
+
+    run_app((loaded, narrow_and_organize), (narrow, check), argv=[make_pdf(pages=5)])

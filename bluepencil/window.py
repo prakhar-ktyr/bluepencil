@@ -192,6 +192,13 @@ class BluepencilWindow(Adw.ApplicationWindow):
 
         narrow = Adw.Breakpoint.new(Adw.BreakpointCondition.parse("max-width: 600sp"))
         narrow.add_setter(self._split, "collapsed", True)
+        # Everything must fit in the narrowest window, 360 pixels.
+        narrow.add_setter(self._open_header_button, "visible", False)
+        narrow.add_setter(self._save_button, "visible", False)
+        narrow.add_setter(self._save_icon_button, "visible", True)
+        narrow.add_setter(self._extract_button, "visible", False)
+        narrow.add_setter(self._split_button, "visible", False)
+        narrow.add_setter(self._more_pages_button, "visible", True)
         self.add_breakpoint(narrow)
         self.set_size_request(360, 400)  # windows with breakpoints need a minimum size
 
@@ -1088,15 +1095,25 @@ class BluepencilWindow(Adw.ApplicationWindow):
                 tooltip_text=_("Organize Pages (Ctrl+G)"),
             )
         )
-        header.pack_start(Gtk.Button(label=_("Open"), action_name="win.open", tooltip_text=_("Open a PDF")))
+        self._open_header_button = Gtk.Button(
+            label=_("Open"), action_name="win.open", tooltip_text=_("Open a PDF (Ctrl+O)")
+        )
+        header.pack_start(self._open_header_button)
         header.pack_end(self._build_menu_button())
+        # In narrow windows a smaller Save button takes this one's place.
         self._save_button = Gtk.Button(label=_("Save"), action_name="win.save", tooltip_text=_("Save (Ctrl+S)"))
         self._save_button.add_css_class("suggested-action")
+        self._save_icon_button = Gtk.Button(
+            icon_name="document-save-symbolic", action_name="win.save", tooltip_text=_("Save (Ctrl+S)"), visible=False
+        )
+        self._save_icon_button.add_css_class("suggested-action")
         header.pack_end(self._save_button)
+        header.pack_end(self._save_icon_button)
         return header
 
     def _build_menu_button(self) -> Gtk.MenuButton:
         files = Gio.Menu()
+        files.append(_("Open…"), "win.open")
         files.append(_("Save As…"), "win.save-as")
         edits = Gio.Menu()
         edits.append(_("Undo"), "win.undo")
@@ -1140,20 +1157,25 @@ class BluepencilWindow(Adw.ApplicationWindow):
         insert.append(_("Blank Page"), "win.insert-blank")
         insert.append(_("Pages or Pictures From Files…"), "win.insert-files")
         tools.append(Gtk.MenuButton(icon_name="list-add-symbolic", menu_model=insert, tooltip_text=_("Insert")))
-        tools.append(
-            Gtk.Button(
-                label=_("Extract…"),
-                action_name="win.extract-pages",
-                tooltip_text=_("Save the selected pages as a new PDF"),
-            )
+        self._extract_button = Gtk.Button(
+            label=_("Extract…"),
+            action_name="win.extract-pages",
+            tooltip_text=_("Save the selected pages as a new PDF"),
         )
-        tools.append(
-            Gtk.Button(
-                label=_("Split…"),
-                action_name="win.split",
-                tooltip_text=_("Cut the document into several new PDFs"),
-            )
+        self._split_button = Gtk.Button(
+            label=_("Split…"),
+            action_name="win.split",
+            tooltip_text=_("Cut the document into several new PDFs"),
         )
+        # In narrow windows the two labelled buttons fold into this menu.
+        more = Gio.Menu()
+        more.append(_("Extract…"), "win.extract-pages")
+        more.append(_("Split…"), "win.split")
+        self._more_pages_button = Gtk.MenuButton(
+            icon_name="view-more-symbolic", menu_model=more, tooltip_text=_("More"), visible=False
+        )
+        for widget in (self._extract_button, self._split_button, self._more_pages_button):
+            tools.append(widget)
         bar.pack_start(tools)
 
         history = Gtk.Box()
