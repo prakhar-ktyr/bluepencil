@@ -13,7 +13,8 @@ from gi.repository import Gio  # noqa: E402
 
 from bluepencil.ui.document_view import MARGIN, _same_scale  # noqa: E402
 
-from .helpers import drawn_top, loaded  # noqa: E402
+from .helpers import after, drawn_top, loaded, reading, scroll_position  # noqa: E402
+from .test_start_page import find_button  # noqa: E402
 
 
 def fills_the_width(window) -> bool:
@@ -135,6 +136,43 @@ def test_last_page_stays_current_after_jumping_to_it(run_app, make_pdf):
         assert window._page_entry.get_text() == "40"
 
     run_app((loaded, jump), (arrived, check), argv=[make_pdf(pages=40)])
+
+
+def test_the_pages_stay_put_when_the_focus_comes_back_to_them(run_app, make_pdf):
+    # GTK scrolls whatever takes the focus into view, and the pages take it
+    # as one tall column: away from the top, the view jumped toward page 1.
+    marks: dict[str, float] = {}
+
+    def go_to_page_5(window) -> None:
+        window.view.go_to_page(4)
+
+    def type_7_in_the_page_box(window) -> None:
+        entry = window._page_entry
+        entry.grab_focus()
+        entry.set_text("7")
+        entry.emit("activate")  # goes there, and gives the focus back to the pages
+        marks["position"] = scroll_position(window)
+
+    def check_and_use_a_button(window) -> None:
+        assert window.view.current_page == 6
+        assert scroll_position(window) == marks["position"]
+        find_button(window, "Zoom Out").grab_focus()  # as a click on it does
+
+    def click_a_page(window) -> None:
+        window.view.focus_pages()  # what a click on a page does
+
+    def check(window) -> None:
+        assert window.view.current_page == 6
+        assert scroll_position(window) == marks["position"]
+
+    run_app(
+        (loaded, go_to_page_5),
+        (reading(4), type_7_in_the_page_box),
+        (after(0.5), check_and_use_a_button),
+        (after(0.2), click_a_page),
+        (after(0.5), check),
+        argv=[make_pdf(pages=10)],
+    )
 
 
 def test_damaged_file_says_why_it_cannot_open(run_app, tmp_path):

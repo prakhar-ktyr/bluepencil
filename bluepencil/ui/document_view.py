@@ -171,7 +171,12 @@ class DocumentView(Gtk.Box):
         self._column.update_property([Gtk.AccessibleProperty.LABEL], [_("Pages")])
         for sheet in self.pages:
             self._column.append(sheet)
-        self._scroller = Gtk.ScrolledWindow(child=self._column, hexpand=True, vexpand=True)
+        # A viewport scrolls whatever takes the keyboard focus into view. Here
+        # that is the whole column of pages, so the view jumped away from the
+        # page being read, often to the first, whenever the focus came back
+        # from a button, the page box, the thumbnails or Organize.
+        viewport = Gtk.Viewport(child=self._column, scroll_to_focus=False)
+        self._scroller = Gtk.ScrolledWindow(child=viewport, hexpand=True, vexpand=True)
         self.append(self._scroller)
 
         self._fit = fit
