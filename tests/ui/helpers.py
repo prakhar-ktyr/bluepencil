@@ -48,6 +48,23 @@ def scroll_position(window) -> float:
     return window.view._scroller.get_vadjustment().get_value()
 
 
+def window_state(window) -> str:
+    """What the window shows, in a few words, for a step that timed out."""
+    view = window.view if window is not None else None
+    if view is None:
+        return "no document"
+    drawn = [page.index + 1 for page in view.pages if page.texture is not None]
+    state = (
+        f"page {view.current_page + 1} of {view.page_count} current, scrolled to "
+        f"{scroll_position(window):.0f} px, pages {drawn} drawn"
+    )
+    grid = window.organize
+    if grid is not None:
+        shown = "open" if window._stack.get_visible_child() is grid else "closed"
+        state += f"; Organize {shown}, pages {[index + 1 for index in grid.selected_pages()]} selected"
+    return state
+
+
 def drawn_top(view, index: int) -> float:
     """Where page `index` is actually laid out, relative to the visible area."""
     _ok, point = view.pages[index].compute_point(view._scroller, Graphene.Point().init(0, 0))

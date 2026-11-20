@@ -14,6 +14,8 @@ from gi.repository import Gio, GLib  # noqa: E402
 
 from bluepencil.application import BluepencilApplication  # noqa: E402
 
+from .helpers import window_state  # noqa: E402
+
 
 @pytest.fixture
 def run_app():
@@ -42,7 +44,13 @@ def run_app():
                         if time.monotonic() < deadline:
                             return GLib.SOURCE_CONTINUE
                         name = (condition.__doc__ or condition.__name__).strip()
-                        raise AssertionError(f"timed out waiting for: {name}")
+                        # Which step, and what the window showed instead: a
+                        # failure on another system says what went wrong there.
+                        step = len(steps) - len(pending) + 1
+                        raise AssertionError(
+                            f"step {step} of {len(steps)} timed out waiting for: {name}. "
+                            f"The window showed {window_state(window)}"
+                        )
                     pending.pop(0)
                     action(window)
                     return GLib.SOURCE_CONTINUE
