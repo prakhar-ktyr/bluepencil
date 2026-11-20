@@ -1041,9 +1041,21 @@ class BluepencilWindow(Adw.ApplicationWindow):
 
     def _on_toggle_organize(self, action: Gio.SimpleAction, value: GLib.Variant) -> None:
         action.set_state(value)
-        self._set_organize(value.get_boolean())
+        on = value.get_boolean()
+        organize, view = self.organize, self.view
+        if organize is not None and view is not None:
+            pages = organize.selected_pages()
+            if on and pages[:1] != [view.current_page]:
+                # The grid opens at the page being read. Pages chosen in it
+                # last time stay chosen only if reading has not moved since.
+                organize.select_pages([view.current_page])
+            elif not on and pages and pages[0] != view.current_page:
+                # Reading goes on from the first page chosen in the grid.
+                view.go_to_page(pages[0])
+        self._set_organize(on)
 
     def _set_organize(self, on: bool) -> None:
+        """Show the grid or the page view, as the Organize action says."""
         if on and self.view is not None and self.organize is None:
             self._build_organize(self._current_pages())
         organize = self.organize
@@ -1058,9 +1070,7 @@ class BluepencilWindow(Adw.ApplicationWindow):
             organize.focus_grid()
         else:
             self._stack.set_visible_child(self._split)
-            pages = organize.selected_pages()
-            if pages and self.view is not None:
-                self.view.go_to_page(pages[0])
+            if self.view is not None:
                 self.view.focus_pages()
 
     def _build_organize(self, selected: list[int]) -> None:

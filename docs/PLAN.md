@@ -574,7 +574,9 @@ Engine
 Interface
 
 - [x] Organize mode (Ctrl+G): page grid, multi-select, drag-and-drop
-      reordering; a double click goes back to reading at that page
+      reordering. It opens at the page being read; closing it goes back
+      there, or to the first page chosen in the grid, and a double click
+      goes back to reading at that page
       (dragging not yet tried by hand: the tests call the drop handler)
 - [x] Toolbar buttons and keyboard shortcuts for every page operation, so that
       nothing depends on dragging: Alt and the arrow keys move pages, Delete

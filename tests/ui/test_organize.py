@@ -10,8 +10,9 @@ gi.require_version("Gio", "2.0")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gdk, Gio, Gtk  # noqa: E402
 
-from .helpers import loaded  # noqa: E402
+from .helpers import after, loaded, reading, scroll_position  # noqa: E402
 from .test_editing import settled  # noqa: E402
+from .test_start_page import find_button  # noqa: E402
 
 #: Pages of different widths, so that their order can be read from the sizes.
 SIZES = [(300, 800), (400, 800), (500, 800), (600, 800), (700, 800)]
@@ -60,6 +61,84 @@ def test_the_grid_shows_every_page_with_the_current_one_selected(run_app, make_p
         (grid_shown, check),
         (back_to_reading, check_back),
         argv=[make_pdf(pages=5)],
+    )
+
+
+def test_the_organize_button_opens_and_closes_at_the_page_being_read(run_app, make_pdf):
+    # Clicked twice, the button used to land on the first or the last page,
+    # and the grid kept the page of its first visit as the one to go back to.
+    marks: dict[str, float] = {}
+
+    def click_organize(window) -> None:
+        button = find_button(window, "Organize Pages (Ctrl+G)")
+        button.grab_focus()  # as a click does, before the button acts
+        button.emit("clicked")
+
+    def go_to_page(index: int):
+        def step(window) -> None:
+            window.view.go_to_page(index)
+
+        return step
+
+    def check_grid_and_close(index: int):
+        def step(window) -> None:
+            assert window.organize.selected_pages() == [index]
+            marks["position"] = scroll_position(window)
+            click_organize(window)
+
+        return step
+
+    def check_reading(index: int):
+        def step(window) -> None:
+            assert window.view.current_page == index
+            assert scroll_position(window) == marks["position"]
+
+        return step
+
+    run_app(
+        (loaded, go_to_page(4)),
+        (reading(4), click_organize),
+        (grid_shown, check_grid_and_close(4)),
+        (after(0.5), check_reading(4)),
+        (reading(4), go_to_page(8)),  # read on, then organize again
+        (reading(8), click_organize),
+        (grid_shown, check_grid_and_close(8)),
+        (after(0.5), check_reading(8)),
+        argv=[make_pdf(pages=10)],
+    )
+
+
+def test_undo_while_reading_stays_on_the_page_being_read(run_app, make_pdf):
+    # The grid stays between visits, and an undo used to send reading back to
+    # the page chosen in it on the last visit.
+    def go_to_page_5(window) -> None:
+        window.view.go_to_page(4)
+
+    def rotate(window) -> None:
+        window.activate_action("win.rotate-right", None)
+
+    def read_on_to_page_9(window) -> None:
+        window.view.go_to_page(8)
+
+    def undo(window) -> None:
+        window.activate_action("win.undo", None)
+
+    def undone(window) -> bool:
+        """the rotation to be undone"""
+        return settled(window) and not window._state.get("can_undo")
+
+    def check(window) -> None:
+        assert window.view.current_page == 8
+
+    run_app(
+        (loaded, go_to_page_5),
+        (reading(4), rotate),
+        (settled, organize),
+        (grid_shown, organize),  # and back
+        (reading(4), read_on_to_page_9),
+        (reading(8), undo),
+        (undone, check),
+        argv=[make_pdf(pages=10)],
     )
 
 
