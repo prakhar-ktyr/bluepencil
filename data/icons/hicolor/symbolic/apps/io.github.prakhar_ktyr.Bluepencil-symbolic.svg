@@ -2,6 +2,8 @@
 <!-- SPDX-FileCopyrightText: 2026 Prakhar Katiyar -->
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
-  <path d="M3 1 h6 l3 3 v3.5 l-2 2 V5 H8 V3 H4 v10 h3.5 l-1 2 H3 a1 1 0 0 1 -1 -1 V2 a1 1 0 0 1 1 -1 Z" fill="#222222"/>
-  <path d="M13.3 7.6 l1.1 1.1 a0.8 0.8 0 0 1 0 1.1 L9 15.2 L7 15.6 L7.4 13.6 L12.2 8.8 Z" fill="#222222"/>
+  <!-- The app icon in one colour: a pencil, eraser apart, writing a line. -->
+  <path d="M11.5 1.5 L14.5 4.5 L12.94 6.06 L9.94 3.06 Z" fill="#222222"/>
+  <path d="M9.38 3.62 L12.38 6.62 L7.43 11.57 L3 13 L4.43 8.57 Z" fill="#222222"/>
+  <path d="M2.75 14 H10.25 a0.75 0.75 0 0 1 0 1.5 H2.75 a0.75 0.75 0 0 1 0 -1.5 Z" fill="#222222"/>
 </svg>

@@ -631,7 +631,11 @@ no test or manual check can make the app lose or corrupt a file.
 
 - [x] App icon (SVG, plus a symbolic one), desktop file that registers
       Bluepencil for PDF files, store metadata file (`data/`); checked by
-      `desktop-file-validate` and `appstreamcli validate` in the tests
+      `desktop-file-validate` and `appstreamcli validate` in the tests. The
+      icon is a chunky blue pencil writing a blue line: the name as the
+      picture (20 November 2026). A white page with a pencil, the first
+      design, looked like GNOME Text Editor and Xournal++ in the dock; most
+      document apps are a white page with something on it
 - [x] `snap/snapcraft.yaml`: `core24`, GNOME extension, strict confinement,
       `home` and `removable-media`, no `network`. Python, PyGObject, GTK and
       libadwaita come from the GNOME runtime (`gnome-46-2404`: GTK 4.18,

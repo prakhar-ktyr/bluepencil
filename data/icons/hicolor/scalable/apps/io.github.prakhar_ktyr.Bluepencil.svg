@@ -2,32 +2,40 @@
 <!-- SPDX-FileCopyrightText: 2026 Prakhar Katiyar -->
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
-  <!-- Bluepencil's app icon: a blue pencil over a page. Colours from the GNOME
-       palette. Sized like GNOME's own document icons (Document Viewer, Text
-       Editor): about 96 by 112 on the 128 canvas, inside its 8-pixel margin.
-       Keep this note here, below the svg tag: icon loaders look for that tag
-       near the start of the file. -->
-  <!-- the page, with its shadow and folded corner -->
-  <path d="M26 11 H86 L110 35 V109 a8 8 0 0 1 -8 8 H26 a8 8 0 0 1 -8 -8 V19 a8 8 0 0 1 8 -8 Z" fill="#000000" fill-opacity="0.18"/>
-  <path d="M26 8 H86 L110 32 V106 a8 8 0 0 1 -8 8 H26 a8 8 0 0 1 -8 -8 V16 a8 8 0 0 1 8 -8 Z" fill="#ffffff" stroke="#c0bfbc" stroke-width="1"/>
-  <path d="M86 8 V24 a8 8 0 0 0 8 8 H110 Z" fill="#deddda"/>
-  <!-- lines of text -->
-  <g fill="#c0bfbc">
-    <rect x="30" y="42" width="62" height="6" rx="3"/>
-    <rect x="30" y="56" width="52" height="6" rx="3"/>
-    <rect x="30" y="70" width="58" height="6" rx="3"/>
-    <rect x="30" y="84" width="30" height="6" rx="3"/>
-  </g>
-  <!-- the pencil, drawn pointing right and then turned to point up and right -->
-  <g transform="translate(67.8 71.9) rotate(-40) scale(1.2)">
-    <rect x="-52" y="-9" width="10" height="18" rx="3" fill="#f66151"/>
-    <rect x="-44" y="-9" width="8" height="18" fill="#c0bfbc"/>
-    <rect x="-44" y="-9" width="8" height="4" fill="#deddda"/>
-    <rect x="-36" y="-9" width="58" height="18" fill="#3584e4"/>
-    <rect x="-36" y="-9" width="58" height="6" fill="#62a0ea"/>
-    <rect x="-36" y="3" width="58" height="6" fill="#1c71d8"/>
-    <path d="M22 -9 L44 0 L22 9 Z" fill="#f9dfb6"/>
-    <path d="M22 -9 L44 0 L22 -3 Z" fill="#fbeacf"/>
-    <path d="M36.5 -3.1 L44 0 L36.5 3.1 Z" fill="#3d3846"/>
+  <!-- Bluepencil's app icon: a chunky blue pencil writing a blue line, the
+       name as the picture. Most document apps are a white page with
+       something on it; this one is not. Colours from the GNOME palette.
+       Keep this note below the svg tag: icon loaders look for that tag near
+       the start of the file. -->
+
+  <!-- the line it writes -->
+  <path d="M22 104 C 40 92, 66 120, 108 100" fill="none" stroke="#1c71d8" stroke-width="12" stroke-linecap="round"/>
+
+  <!-- the pencil, drawn pointing right from its middle, then turned so that
+       its tip rests on the start of the line -->
+  <g transform="translate(63 63) rotate(135)">
+    <!-- After the turn, the drawing's lower side (positive y) faces the top
+         left, where the light comes from: that side is the light one. -->
+    <!-- eraser -->
+    <rect x="-58" y="-17" width="18" height="34" rx="6" fill="#f66151"/>
+    <rect x="-58" y="-17" width="18" height="11" rx="5" fill="#ed333b"/>
+    <rect x="-49" y="-17" width="9" height="11" fill="#ed333b"/>
+    <!-- metal band -->
+    <rect x="-45" y="-17" width="12" height="34" fill="#deddda"/>
+    <rect x="-45" y="11" width="12" height="6" fill="#f6f5f4"/>
+    <rect x="-45" y="-17" width="12" height="11" fill="#c0bfbc"/>
+    <rect x="-42" y="-17" width="1.5" height="34" fill="#9a9996"/>
+    <rect x="-37.5" y="-17" width="1.5" height="34" fill="#9a9996"/>
+    <!-- sharpened wood -->
+    <path d="M20 -17 L58 0 L20 0 Z" fill="#f0cf9d"/>
+    <path d="M20 0 L58 0 L20 17 Z" fill="#fbeacf"/>
+    <!-- blue lead -->
+    <path d="M46 -5.3 L58 0 L46 0 Z" fill="#1a5fb4"/>
+    <path d="M46 0 L58 0 L46 5.3 Z" fill="#3584e4"/>
+    <!-- painted body: three facets, each ending in the curve the sharpener leaves -->
+    <path d="M-33 -17 H23 Q29 -11.5 23 -6 H-33 Z" fill="#1c71d8"/>
+    <path d="M-33 -6 H23 Q29 0 23 6 H-33 Z" fill="#3584e4"/>
+    <path d="M-33 6 H23 Q29 11.5 23 17 H-33 Z" fill="#62a0ea"/>
+    <rect x="-31" y="13" width="50" height="2" rx="1" fill="#99c1f1"/>
   </g>
 </svg>
