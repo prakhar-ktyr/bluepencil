@@ -2,11 +2,15 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The Compress dialog."""
 
+import gi
 import pymupdf
 
-from bluepencil.core.places import jobs_root
+gi.require_version("Gtk", "4.0")
+from gi.repository import Gtk  # noqa: E402
 
-from .helpers import loaded
+from bluepencil.core.places import jobs_root  # noqa: E402
+
+from .helpers import loaded  # noqa: E402
 
 
 def open_dialog(window) -> None:
@@ -63,6 +67,24 @@ def test_compress_shows_the_real_result_and_saves_a_smaller_copy(run_app, photos
         (saved, check),
         argv=[photos],
     )
+
+
+def test_the_compress_button_is_as_tall_as_other_buttons(run_app, photos):
+    # The stages of the dialog share the height of the tallest one, and the
+    # button stretched to fill it.
+    def laid_out(window) -> bool:
+        """the dialog to be laid out"""
+        return dialog_open(window) and window.compress_dialog.compress_button.get_height() > 0
+
+    def check(window) -> None:
+        button = window.compress_dialog.compress_button
+        _minimum, natural, _baseline, _natural_baseline = button.measure(
+            Gtk.Orientation.VERTICAL, button.get_width()
+        )
+        _found, bounds = button.compute_bounds(button)  # with its padding, as measured
+        assert bounds.get_height() == natural
+
+    run_app((loaded, open_dialog), (laid_out, check), argv=[photos])
 
 
 def test_when_nothing_can_be_saved_it_says_so(run_app, photos):

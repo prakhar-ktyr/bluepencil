@@ -94,7 +94,13 @@ class CompressDialog(Adw.Dialog):
             check.connect("toggled", weakly(self._on_choice_changed))
         self._group = group
 
-        self.compress_button = Gtk.Button(label=_("_Compress"), use_underline=True, halign=Gtk.Align.CENTER)
+        # The stage below keeps the height of its tallest page, so that the
+        # dialog keeps its size as compressing starts and ends. Each page sits
+        # in the middle of it at its own height: a button left to fill it was
+        # twice as tall as a button.
+        self.compress_button = Gtk.Button(
+            label=_("_Compress"), use_underline=True, halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER
+        )
         self.compress_button.add_css_class("suggested-action")
         self.compress_button.add_css_class("pill")
         self.compress_button.connect("clicked", weakly(self._on_compress_clicked))
@@ -103,7 +109,7 @@ class CompressDialog(Adw.Dialog):
         cancel = Gtk.Button(label=_("C_ancel"), use_underline=True, halign=Gtk.Align.CENTER)
         cancel.add_css_class("pill")
         cancel.connect("clicked", weakly(self._on_cancel_clicked))
-        running = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        running = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, valign=Gtk.Align.CENTER)
         running.append(self.progress)
         running.append(cancel)
 
@@ -113,7 +119,7 @@ class CompressDialog(Adw.Dialog):
         self.save_button.add_css_class("suggested-action")
         self.save_button.add_css_class("pill")
         self.save_button.connect("clicked", weakly(self._on_save_clicked))
-        done = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        done = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, valign=Gtk.Align.CENTER)
         done.append(self.result_label)
         done.append(self.save_button)
 
